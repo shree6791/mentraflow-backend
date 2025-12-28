@@ -456,30 +456,47 @@ curl "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-44665544000
 ---
 
 ### Regenerate Document Summary
-**POST** `/api/v1/documents/{document_id}/summary?async=false`
+**POST** `/api/v1/documents/{document_id}/summary?async=false&max_bullets=7`
 
-Regenerate document summary.
+Generate or regenerate document summary using SummaryAgent.
 
 **Path Parameters:**
 - `document_id` (UUID): Document ID
 
 **Query Parameters:**
 - `async` (boolean, default: `false`): Run in background
+- `max_bullets` (integer, default: `7`, range: 1-20): Maximum number of bullet points in summary
 
-**Response:** `200 OK`
+**Response:** `200 OK` (synchronous) or `202 Accepted` (async)
+
+**Synchronous Response (`200 OK`):**
 ```json
 {
+  "document_id": "550e8400-e29b-41d4-a716-446655440002",
   "summary": "This document discusses...",
-  "document_id": "550e8400-e29b-41d4-a716-446655440002"
+  "summary_length": 450,
+  "run_id": "550e8400-e29b-41d4-a716-446655440003"
 }
 ```
 
-**Note:** Uses OpenAI `gpt-4o-mini` for summary generation.
+**Asynchronous Response (`202 Accepted`):**
+```json
+{
+  "run_id": "550e8400-e29b-41d4-a716-446655440003",
+  "status": "queued",
+  "message": "Summary generation queued. Check agent_runs table for status."
+}
+```
+
+**Note:** Uses OpenAI `gpt-4o-mini` for summary generation via SummaryAgent. The agent uses semantic retrieval to find important chunks and generates a conservative, quality-aware summary.
 
 **cURL Example:**
 ```bash
-# Synchronous summary generation
+# Synchronous summary generation (default 7 bullets)
 curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/summary?async=false"
+
+# Synchronous summary generation with custom max_bullets
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/summary?async=false&max_bullets=10"
 
 # Asynchronous summary generation
 curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/summary?async=true"

@@ -14,6 +14,8 @@ from app.agents.types import (
     IngestionAgentOutput,
     KGExtractionAgentInput,
     KGExtractionAgentOutput,
+    SummaryAgentInput,
+    SummaryAgentOutput,
 )
 from app.api.dependencies import get_agent_router
 from app.infrastructure.database import get_db
@@ -686,34 +688,88 @@ async def get_document_summary(
 
 @router.post(
     "/documents/{document_id}/summary",
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    responses={
+        200: {"model": SummaryAgentOutput},
+        202: {"model": AsyncTaskResponse},
+        404: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
     summary="Regenerate document summary",
+    description="Generate or regenerate document summary using SummaryAgent. Use async=true to run in background.",
 )
 async def regenerate_document_summary(
     document_id: Annotated[uuid.UUID, Path(description="Document ID")],
+    background_tasks: BackgroundTasks,
     async_mode: Annotated[bool, Query(description="Run in background")] = False,
+    max_bullets: Annotated[int, Query(description="Maximum number of bullet points", ge=1, le=20)] = 7,
+    agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
-) -> dict:
-    """Regenerate document summary."""
+    request_id: Annotated[str, Depends(get_request_id)] = None,
+) -> SummaryAgentOutput | AsyncTaskResponse:
+    """Regenerate document summary using SummaryAgent."""
     try:
-        from app.services.summary_service import SummaryService
-        
+        # Get document to extract workspace_id and user_id
         document_service = DocumentService(db)
         document = await document_service.get_document(document_id)
         if not document:
             raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
         
-        summary_service = SummaryService(db)
-        summary_text = await summary_service.generate_summary(
+        # Create input
+        input_data = SummaryAgentInput(
             document_id=document_id,
-            max_bullets=7,
+            workspace_id=document.workspace_id,
+            user_id=document.created_by,  # Use document creator as user_id
+            max_bullets=max_bullets,
         )
-        await summary_service.store_summary(
-            document_id=document_id,
-            summary_text=summary_text,
-        )
-        
-        return {"summary": summary_text, "document_id": str(document_id)}
+
+        # If async mode, create run and return immediately
+        if async_mode:
+            try:
+                agent_run_service = AgentRunService(db)
+                input_json = input_data.model_dump()
+                agent_run = await agent_run_service.create_run(
+                    workspace_id=document.workspace_id,
+                    user_id=document.created_by,
+                    agent_name="summary",
+                    input_json=input_json,
+                    status="queued",
+                )
+
+                # Add to background tasks
+                agent_router = AgentRouter(db)
+                add_agent_task(
+                    background_tasks,
+                    "summary",
+                    agent_router.run_summary,
+                    input_data,
+                    agent_run.id,
+                    db,
+                )
+
+                return AsyncTaskResponse(
+                    run_id=agent_run.id,
+                    status="queued",
+                    message="Summary generation queued. Check agent_runs table for status.",
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error queuing summary generation [request_id={request_id}]: {str(e)}",
+                )
+
+        # Synchronous execution
+        try:
+            # Agent router provided via dependency (uses shared GraphRegistry)
+            result = await agent_router.run_summary(input_data)
+
+            return result
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error generating summary [request_id={request_id}]: {str(e)}",
+            )
     except HTTPException:
         raise
     except Exception as e:

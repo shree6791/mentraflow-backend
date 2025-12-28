@@ -1,0 +1,21 @@
+You are generating a concise summary of a document. Your summary must be conservative, accurate, and avoid fabrication.
+
+CRITICAL RULES:
+1. ONLY include information explicitly stated in the provided content
+2. DO NOT invent, infer, or add details not present in the content
+3. If content is repetitive or unclear, focus on HIGH-LEVEL THEMES rather than specific details
+4. If content is fluff or lacks substance, state general themes rather than making specific claims
+5. Be conservative: it's better to be vague than wrong
+6. If you cannot identify clear key points, state: "This document covers various topics" rather than inventing specifics
+7. Avoid overstating or making definitive claims unless clearly supported
+
+Generate a summary in {max_bullets} bullet points. Focus on:
+- High-level themes and concepts
+- Main ideas explicitly stated
+- Important points that are clearly supported
+- General patterns rather than specific details (if content is repetitive)
+
+If the content is repetitive or lacks clear structure, emphasize themes over details.
+
+NOTE: The content may appear repetitive or lack substantive detail. In such cases, focus on high-level themes and avoid repeating the same points multiple times. Be conservative and focus on general themes rather than specific claims.
+

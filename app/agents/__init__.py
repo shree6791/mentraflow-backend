@@ -5,6 +5,7 @@ from app.agents.ingestion_agent import IngestionAgent
 from app.agents.kg_extraction_agent import KGExtractionAgent
 from app.agents.router import AgentRouter
 from app.agents.study_chat_agent import StudyChatAgent
+from app.agents.summary_agent import SummaryAgent
 from app.agents.types import (
     FlashcardAgentInput,
     FlashcardAgentOutput,
@@ -14,6 +15,8 @@ from app.agents.types import (
     KGExtractionAgentOutput,
     StudyChatAgentInput,
     StudyChatAgentOutput,
+    SummaryAgentInput,
+    SummaryAgentOutput,
 )
 
 __all__ = [
@@ -22,6 +25,7 @@ __all__ = [
     "StudyChatAgent",
     "FlashcardAgent",
     "KGExtractionAgent",
+    "SummaryAgent",
     "AgentRouter",
     "IngestionAgentInput",
     "IngestionAgentOutput",
@@ -31,4 +35,6 @@ __all__ = [
     "FlashcardAgentOutput",
     "KGExtractionAgentInput",
     "KGExtractionAgentOutput",
+    "SummaryAgentInput",
+    "SummaryAgentOutput",
 ]

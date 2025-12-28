@@ -269,21 +269,24 @@ async def _generate_summary(state: IngestionState) -> IngestionState:
         
         if preferences.auto_summary_after_ingest:
             await _log_step(state, "summary", "started")
-            from app.services.summary_service import SummaryService
-            summary_service = SummaryService(db)
-            summary_text = await summary_service.generate_summary(
+            # Use SummaryAgent for consistency with other LLM operations
+            from app.agents.summary_agent import SummaryAgent
+            from app.agents.types import SummaryAgentInput
+            
+            summary_agent = SummaryAgent(db)
+            summary_input = SummaryAgentInput(
                 document_id=input_data.document_id,
+                workspace_id=input_data.workspace_id,
+                user_id=input_data.user_id,
                 max_bullets=7,
             )
-            await summary_service.store_summary(
-                document_id=input_data.document_id,
-                summary_text=summary_text,
-            )
+            # Run without logging (already logged in ingestion graph)
+            summary_output = await summary_agent.run_without_logging(summary_input)
             await _log_step(
                 state,
                 "summary",
                 "completed",
-                details={"summary_length": len(summary_text) if summary_text else 0},
+                details={"summary_length": summary_output.summary_length},
             )
         else:
             await _log_step(

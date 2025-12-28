@@ -10,6 +10,7 @@ from app.agents.graphs import (
     build_ingestion_graph,
     build_kg_extraction_graph,
     build_study_chat_graph,
+    build_summary_graph,
 )
 from app.agents.service_tools import ServiceTools
 from app.core.config import settings
@@ -51,6 +52,7 @@ class GraphRegistry:
         self.flashcard_prompt = (prompts_dir / "flashcard.txt").read_text()
         self.kg_prompt = (prompts_dir / "kg_extraction.txt").read_text()
         self.study_chat_prompt = (prompts_dir / "study_chat.txt").read_text()
+        self.summary_prompt = (prompts_dir / "summary.txt").read_text()
 
         # Initialize graphs (lazy loading - graphs created on first access)
         # Note: Graphs are stateless - service_tools and db are passed in state
@@ -58,6 +60,7 @@ class GraphRegistry:
         self._flashcard_graph: Any | None = None
         self._kg_extraction_graph: Any | None = None
         self._study_chat_graph: Any | None = None
+        self._summary_graph: Any | None = None
 
         self._initialized = True
 
@@ -127,6 +130,26 @@ class GraphRegistry:
             )
         return self._study_chat_graph
 
+    def get_summary_graph(
+        self, service_tools: ServiceTools, llm: Any, system_prompt: str, db: AsyncSession
+    ) -> Any:
+        """Get or create summary graph.
+        
+        Args:
+            service_tools: ServiceTools instance for this request
+            llm: LLM instance
+            system_prompt: System prompt for summary generation
+            db: Database session for this request
+            
+        Returns:
+            Compiled LangGraph instance
+        """
+        if self._summary_graph is None:
+            self._summary_graph = build_summary_graph(
+                service_tools, llm, system_prompt, db
+            )
+        return self._summary_graph
+
     def get_all_graphs(
         self, service_tools: ServiceTools, db: AsyncSession
     ) -> dict[str, Any]:
@@ -144,5 +167,6 @@ class GraphRegistry:
             "flashcard": self.get_flashcard_graph(service_tools, db),
             "kg_extraction": self.get_kg_extraction_graph(service_tools, db),
             "study_chat": self.get_study_chat_graph(service_tools, db),
+            "summary": self.get_summary_graph(service_tools, self.llm, self.summary_prompt, db),
         }
 

@@ -145,3 +145,22 @@ class KGExtractionAgentOutput(BaseModel):
     concepts: list[ExtractedConcept] = Field(description="Extracted concepts")
     edges: list[ExtractedEdge] = Field(description="Extracted edges")
 
+
+# SummaryAgent
+class SummaryAgentInput(BaseModel):
+    """Input for SummaryAgent."""
+
+    document_id: uuid.UUID = Field(description="Document ID to summarize")
+    workspace_id: uuid.UUID = Field(description="Workspace ID")
+    user_id: uuid.UUID = Field(description="User ID")
+    max_bullets: int = Field(default=7, ge=1, le=20, description="Maximum number of bullet points in summary (default: 7)")
+
+
+class SummaryAgentOutput(BaseModel):
+    """Output from SummaryAgent."""
+
+    document_id: uuid.UUID = Field(description="Document ID that was summarized")
+    summary: str = Field(description="Generated summary text")
+    summary_length: int = Field(description="Length of summary in characters")
+    run_id: uuid.UUID | None = Field(default=None, description="Agent run ID for tracking")
+

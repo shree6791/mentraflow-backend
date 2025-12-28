@@ -6,6 +6,7 @@ from app.agents.graphs.registry import GraphRegistry
 from app.agents.ingestion_agent import IngestionAgent
 from app.agents.kg_extraction_agent import KGExtractionAgent
 from app.agents.study_chat_agent import StudyChatAgent
+from app.agents.summary_agent import SummaryAgent
 from app.agents.service_tools import ServiceTools
 from app.agents.types import (
     FlashcardAgentInput,
@@ -16,6 +17,8 @@ from app.agents.types import (
     KGExtractionAgentOutput,
     StudyChatAgentInput,
     StudyChatAgentOutput,
+    SummaryAgentInput,
+    SummaryAgentOutput,
 )
 
 
@@ -53,6 +56,9 @@ class AgentRouter:
             "kg_extraction": KGExtractionAgent(
                 db, graph_registry=self.graph_registry, service_tools=self.service_tools
             ),
+            "summary": SummaryAgent(
+                db, graph_registry=self.graph_registry, service_tools=self.service_tools
+            ),
         }
 
     async def run_ingestion(
@@ -87,6 +93,15 @@ class AgentRouter:
     ) -> KGExtractionAgentOutput:
         """Run KG extraction agent."""
         agent = self._agents["kg_extraction"]
+        if skip_logging:
+            return await agent.run_without_logging(input_data)
+        return await agent.run(input_data)
+
+    async def run_summary(
+        self, input_data: SummaryAgentInput, skip_logging: bool = False
+    ) -> SummaryAgentOutput:
+        """Run summary agent."""
+        agent = self._agents["summary"]
         if skip_logging:
             return await agent.run_without_logging(input_data)
         return await agent.run(input_data)
