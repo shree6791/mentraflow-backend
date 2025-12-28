@@ -16,18 +16,47 @@ This guide walks you through testing the complete document upload and processing
    curl http://localhost:8000/health
    ```
 
-3. **Have UUIDs Ready**: You'll need:
-   - A `workspace_id` (create one first)
-   - A `user_id` (create via signup/login or use existing)
+3. **Have Credentials Ready**: You'll need:
+   - A `username` (create via signup)
+   - A `workspace_id` (create one first using username)
+   - A `user_id` (UUID - get it by username or from signup response)
 
 ---
 
 ## Complete Document Upload Flow
 
-### Step 1: Create a Workspace (if you don't have one)
+### Step 0: Create User (if you don't have one)
+
+**Endpoint:** `POST /api/v1/auth/signup`
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/workspaces?owner_user_id=YOUR_USER_ID" \
+curl -X POST "http://localhost:8000/api/v1/auth/signup" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "testuser",
+    "email": "test@example.com",
+    "password": "securepassword",
+    "full_name": "Test User"
+  }'
+```
+
+**Save the `username` from response → `USERNAME`**
+
+**To get user_id by username:**
+```bash
+curl "http://localhost:8000/api/v1/users/by-username/testuser"
+```
+
+**Save the `user_id` from response → `USER_ID`**
+
+---
+
+### Step 1: Create a Workspace (if you don't have one)
+
+**Endpoint:** `POST /api/v1/workspaces?owner_username={username}`
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/workspaces?owner_username=testuser" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Test Workspace",
@@ -52,9 +81,11 @@ curl -X POST "http://localhost:8000/api/v1/workspaces?owner_user_id=YOUR_USER_ID
 
 ### Step 2: Upload/Create a Document
 
-You have **two options** for creating a document:
+The unified endpoint `POST /api/v1/documents` supports **two modes**:
 
-#### Option A: Create Document with Content (Recommended for Testing)
+#### Option A: Create Document with Text Content (JSON)
+
+**Endpoint:** `POST /api/v1/documents` (Content-Type: `application/json`)
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/documents" \
@@ -63,9 +94,7 @@ curl -X POST "http://localhost:8000/api/v1/documents" \
     "workspace_id": "YOUR_WORKSPACE_ID",
     "user_id": "YOUR_USER_ID",
     "title": "Introduction to Machine Learning",
-    "doc_type": "pdf",
-    "source_url": "https://example.com/ml-intro.pdf",
-    "language": "en",
+    "doc_type": "text",
     "content": "Machine learning is a subset of artificial intelligence that focuses on algorithms that can learn from data. It enables computers to improve their performance on a task through experience without being explicitly programmed for every scenario. There are three main types of machine learning: supervised learning, unsupervised learning, and reinforcement learning. Supervised learning uses labeled data to train models, while unsupervised learning finds patterns in unlabeled data. Reinforcement learning involves training agents to make decisions through trial and error.",
     "metadata": {
       "source": "test",
@@ -83,28 +112,59 @@ curl -X POST "http://localhost:8000/api/v1/documents" \
   "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
   "created_by": "550e8400-e29b-41d4-a716-446655440001",
   "title": "Introduction to Machine Learning",
-  "status": "pending",
+  "status": "processed",
+  "metadata": {
+    "source": "test",
+    "pages": 1
+  },
   "created_at": "2024-01-01T00:00:00Z"
 }
 ```
 
-#### Option B: Create Document via Workspace Endpoint (Auto-ingest if enabled)
+#### Option B: Upload File (Multipart Form Data)
+
+**Endpoint:** `POST /api/v1/documents` (Content-Type: `multipart/form-data`)
+
+**Supported file types:** PDF (.pdf), DOC/DOCX (.doc, .docx), TXT (.txt), MD (.md)
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/documents" \
+  -F "file=@/path/to/your/document.pdf" \
+  -F "workspace_id=YOUR_WORKSPACE_ID" \
+  -F "user_id=YOUR_USER_ID" \
+  -F "title=My Study Document"
+```
+
+**Or with a text file:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/documents" \
+  -F "file=@/path/to/your/document.txt" \
+  -F "workspace_id=YOUR_WORKSPACE_ID" \
+  -F "user_id=YOUR_USER_ID" \
+  -F "title=My Study Document"
+```
+
+**Note:** 
+- The endpoint automatically extracts text from PDF, DOC, DOCX files
+- Text files are read directly
+- If `auto_ingest_on_upload=true` in user preferences, ingestion will start automatically in the background
+
+#### Option C: Create Document via Workspace Endpoint (Backward Compatible)
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/workspaces/YOUR_WORKSPACE_ID/documents" \
   -H "Content-Type: application/json" \
   -d '{
+    "workspace_id": "YOUR_WORKSPACE_ID",
     "user_id": "YOUR_USER_ID",
     "title": "Introduction to Machine Learning",
-    "doc_type": "pdf",
-    "source_url": "https://example.com/ml-intro.pdf",
-    "language": "en",
+    "doc_type": "text",
     "content": "Machine learning is a subset of artificial intelligence...",
     "metadata": {}
   }'
 ```
 
-**Note:** If `auto_ingest_on_upload=true` in user preferences, ingestion will start automatically in the background.
+**Note:** This endpoint delegates to the unified `/documents` endpoint for backward compatibility.
 
 ---
 
@@ -267,10 +327,26 @@ WORKSPACE_ID=""  # Will be set after workspace creation
 echo "🚀 Testing Document Upload Flow"
 echo "================================"
 
+# Configuration
+BASE_URL="http://localhost:8000"
+USERNAME="testuser"  # Replace with your username
+USER_ID=""  # Will be fetched by username
+WORKSPACE_ID=""  # Will be set after workspace creation
+
+echo "🚀 Testing Document Upload Flow"
+echo "================================"
+
+# Step 0: Get User ID by Username
+echo ""
+echo "Step 0: Getting user ID by username..."
+USER_RESPONSE=$(curl -s "${BASE_URL}/api/v1/users/by-username/${USERNAME}")
+USER_ID=$(echo $USER_RESPONSE | grep -o '"user_id":"[^"]*' | cut -d'"' -f4)
+echo "✅ User ID: ${USER_ID}"
+
 # Step 1: Create Workspace
 echo ""
 echo "Step 1: Creating workspace..."
-WORKSPACE_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/v1/workspaces?owner_user_id=${USER_ID}" \
+WORKSPACE_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/v1/workspaces?owner_username=${USERNAME}" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Test Workspace",
@@ -288,7 +364,7 @@ DOC_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/v1/documents" \
     \"workspace_id\": \"${WORKSPACE_ID}\",
     \"user_id\": \"${USER_ID}\",
     \"title\": \"Test ML Document\",
-    \"doc_type\": \"pdf\",
+    \"doc_type\": \"text\",
     \"content\": \"Machine learning is a subset of artificial intelligence. It enables computers to learn from data.\"
   }")
 DOCUMENT_ID=$(echo $DOC_RESPONSE | grep -o '"id":"[^"]*' | cut -d'"' -f4)
@@ -341,6 +417,16 @@ chmod +x test_document_upload.sh
 
 ## Common Issues & Solutions
 
+### Issue: "Workspace {workspace_id} not found" (404)
+**Solution:** 
+- Make sure the workspace exists (create it first using `POST /api/v1/workspaces?owner_username={username}`)
+- Verify you're using the correct `workspace_id` UUID
+
+### Issue: "User {user_id} not found" (404)
+**Solution:**
+- Make sure the user exists (create via `POST /api/v1/auth/signup`)
+- Get the correct `user_id` UUID using `GET /api/v1/users/by-username/{username}`
+
 ### Issue: "Document not found" (404)
 **Solution:** Make sure you're using the correct `document_id` from Step 2.
 
@@ -355,6 +441,18 @@ chmod +x test_document_upload.sh
 1. Check if ingestion was triggered
 2. Check agent run status: `GET /api/v1/agent-runs/{run_id}`
 3. Look for errors in the agent run `error` field
+
+### Issue: "Failed to extract text from PDF/DOC"
+**Solution:**
+- For PDF: Make sure `pypdf` is installed: `pip install pypdf`
+- For DOC/DOCX: Make sure `python-docx` is installed: `pip install python-docx`
+- Check that the file is not corrupted or password-protected
+
+### Issue: "Unsupported file type"
+**Solution:** Currently supported file types are:
+- PDF (.pdf)
+- DOC/DOCX (.doc, .docx)
+- Text files (.txt, .md)
 
 ---
 
