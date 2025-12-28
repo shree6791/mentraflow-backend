@@ -42,6 +42,11 @@ Check application health (database and Qdrant connections).
 
 **Error Response:** `503 Service Unavailable` (if database or Qdrant unavailable)
 
+**cURL Example:**
+```bash
+curl http://localhost:8000/health
+```
+
 ---
 
 ## Workspaces
@@ -73,6 +78,16 @@ Create a new workspace.
 }
 ```
 
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/workspaces?owner_user_id=550e8400-e29b-41d4-a716-446655440001" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Workspace",
+    "plan_tier": "free"
+  }'
+```
+
 ---
 
 ### List Workspaces
@@ -96,6 +111,15 @@ List workspaces.
 ]
 ```
 
+**cURL Example:**
+```bash
+# List all workspaces
+curl "http://localhost:8000/api/v1/workspaces"
+
+# List workspaces for a specific owner
+curl "http://localhost:8000/api/v1/workspaces?owner_user_id=550e8400-e29b-41d4-a716-446655440001"
+```
+
 ---
 
 ### Get Workspace
@@ -115,6 +139,11 @@ Get a workspace by ID.
   "owner_id": "550e8400-e29b-41d4-a716-446655440001",
   "created_at": "2024-01-01T00:00:00Z"
 }
+```
+
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000"
 ```
 
 ---
@@ -137,6 +166,16 @@ Update a workspace.
 
 **Response:** `200 OK` (WorkspaceRead)
 
+**cURL Example:**
+```bash
+curl -X PATCH "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Workspace Name",
+    "plan_tier": "pro"
+  }'
+```
+
 ---
 
 ### Delete Workspace
@@ -148,6 +187,11 @@ Delete a workspace (cascade deletes all related data).
 - `workspace_id` (UUID): Workspace ID
 
 **Response:** `204 No Content`
+
+**cURL Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000"
+```
 
 ---
 
@@ -184,6 +228,22 @@ Create a new document in a workspace.
 }
 ```
 
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/documents" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "title": "My Study Document",
+    "doc_type": "pdf",
+    "source_url": "https://example.com/document.pdf",
+    "language": "en",
+    "content": "Your document text content here...",
+    "metadata": {}
+  }'
+```
+
 ---
 
 ### Create Document (Workspace-scoped)
@@ -195,6 +255,21 @@ Create a new document in a specific workspace (alternative endpoint).
 - `workspace_id` (UUID): Workspace ID
 
 **Request Body:** Same as above (without workspace_id in body)
+
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000/documents" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "title": "My Study Document",
+    "doc_type": "pdf",
+    "source_url": "https://example.com/document.pdf",
+    "language": "en",
+    "content": "Your document text content here...",
+    "metadata": {}
+  }'
+```
 
 ---
 
@@ -208,6 +283,11 @@ List all documents in a workspace.
 
 **Response:** `200 OK` (list of DocumentRead)
 
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000/documents"
+```
+
 ---
 
 ### Get Document
@@ -219,6 +299,11 @@ Get a document by ID (includes status, summary_text, last_run_id).
 - `document_id` (UUID): Document ID
 
 **Response:** `200 OK` (DocumentRead)
+
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002"
+```
 
 ---
 
@@ -243,6 +328,19 @@ Update a document.
 
 **Response:** `200 OK` (DocumentRead)
 
+**cURL Example:**
+```bash
+curl -X PATCH "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Updated Title",
+    "doc_type": "pdf",
+    "source_url": "https://example.com/updated.pdf",
+    "language": "en",
+    "metadata": {}
+  }'
+```
+
 ---
 
 ### Delete Document
@@ -255,6 +353,11 @@ Delete a document (cascade deletes chunks, embeddings, etc.).
 
 **Response:** `204 No Content`
 
+**cURL Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002"
+```
+
 ---
 
 ### Get Document Status
@@ -266,6 +369,11 @@ Get document status (alias to document GET).
 - `document_id` (UUID): Document ID
 
 **Response:** `200 OK` (DocumentRead)
+
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/status"
+```
 
 ---
 
@@ -302,6 +410,26 @@ Process a document: chunk it and generate embeddings.
 
 **Note:** Uses OpenAI embeddings (`text-embedding-3-small`) and optionally generates summary with `gpt-4o-mini`.
 
+**cURL Example:**
+```bash
+# Synchronous ingestion
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/ingest?async=false" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "raw_text": "Optional: additional text to store"
+  }'
+
+# Asynchronous ingestion
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/ingest?async=true" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001"
+  }'
+```
+
 ---
 
 ### Get Document Summary
@@ -318,6 +446,11 @@ Get document summary.
   "summary": "This document discusses...",
   "document_id": "550e8400-e29b-41d4-a716-446655440002"
 }
+```
+
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/summary"
 ```
 
 ---
@@ -342,6 +475,15 @@ Regenerate document summary.
 ```
 
 **Note:** Uses OpenAI `gpt-4o-mini` for summary generation.
+
+**cURL Example:**
+```bash
+# Synchronous summary generation
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/summary?async=false"
+
+# Asynchronous summary generation
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/summary?async=true"
+```
 
 ---
 
@@ -385,6 +527,27 @@ Generate flashcards from a document.
 ```
 
 **Note:** Uses OpenAI `gpt-4o-mini` for flashcard generation.
+
+**cURL Example:**
+```bash
+# Synchronous flashcard generation
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/flashcards?mode=key_terms&async=false" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "mode": "key_terms"
+  }'
+
+# Asynchronous flashcard generation
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/flashcards?mode=qa&async=true" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "mode": "qa"
+  }'
+```
 
 ---
 
@@ -433,6 +596,25 @@ Extract concepts and relationships from a document.
 
 **Note:** Uses OpenAI `gpt-4o-mini` for KG extraction.
 
+**cURL Example:**
+```bash
+# Synchronous KG extraction
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/kg?async=false" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001"
+  }'
+
+# Asynchronous KG extraction
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/kg?async=true" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001"
+  }'
+```
+
 ---
 
 ### Reindex Document Embeddings
@@ -456,6 +638,11 @@ Delete old embeddings and regenerate with current embedding model.
 ```
 
 **Note:** Uses OpenAI `text-embedding-3-small` for embeddings.
+
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/reindex?embedding_model=default"
+```
 
 ---
 
@@ -510,6 +697,36 @@ Ask questions about documents in your workspace.
 
 **Note:** Uses OpenAI `text-embedding-3-small` for query embeddings and `gpt-4o-mini` for answer generation.
 
+**cURL Example:**
+```bash
+# Basic chat query
+curl -X POST "http://localhost:8000/api/v1/chat" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "message": "What is the main topic of this document?",
+    "document_id": "550e8400-e29b-41d4-a716-446655440002",
+    "top_k": 8
+  }'
+
+# Chat with conversation history
+curl -X POST "http://localhost:8000/api/v1/chat" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "message": "Can you give an example?",
+    "document_id": "550e8400-e29b-41d4-a716-446655440002",
+    "conversation_id": "550e8400-e29b-41d4-a716-446655440005",
+    "previous_messages": [
+      {"role": "user", "content": "What is machine learning?"},
+      {"role": "assistant", "content": "Machine learning is..."}
+    ],
+    "top_k": 8
+  }'
+```
+
 ---
 
 ## Flashcards
@@ -528,6 +745,18 @@ List flashcards, optionally filtered by document or user.
 
 **Response:** `200 OK` (list of FlashcardRead)
 
+**cURL Example:**
+```bash
+# List all flashcards in workspace
+curl "http://localhost:8000/api/v1/flashcards?workspace_id=550e8400-e29b-41d4-a716-446655440000&limit=20&offset=0"
+
+# List flashcards for a specific document
+curl "http://localhost:8000/api/v1/flashcards?workspace_id=550e8400-e29b-41d4-a716-446655440000&document_id=550e8400-e29b-41d4-a716-446655440002"
+
+# List flashcards for a specific user
+curl "http://localhost:8000/api/v1/flashcards?workspace_id=550e8400-e29b-41d4-a716-446655440000&user_id=550e8400-e29b-41d4-a716-446655440001"
+```
+
 ---
 
 ### Get Flashcard
@@ -539,6 +768,11 @@ Get a flashcard by ID.
 - `flashcard_id` (UUID): Flashcard ID
 
 **Response:** `200 OK` (FlashcardRead)
+
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/flashcards/550e8400-e29b-41d4-a716-446655440009"
+```
 
 ---
 
@@ -553,6 +787,11 @@ Get flashcards due for review (SRS algorithm).
 - `limit` (int, default: 20, max: 100): Maximum number of results
 
 **Response:** `200 OK` (list of FlashcardRead)
+
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/flashcards/due?workspace_id=550e8400-e29b-41d4-a716-446655440000&user_id=550e8400-e29b-41d4-a716-446655440001&limit=20"
+```
 
 ---
 
@@ -596,6 +835,29 @@ Record a flashcard review and update SRS state.
 }
 ```
 
+**cURL Example:**
+```bash
+# Normal review (respects due date and cooldown)
+curl -X POST "http://localhost:8000/api/v1/flashcards/550e8400-e29b-41d4-a716-446655440009/review" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "grade": 2,
+    "response_time_ms": 5000
+  }'
+
+# Force review (bypass due check and cooldown)
+curl -X POST "http://localhost:8000/api/v1/flashcards/550e8400-e29b-41d4-a716-446655440009/review?force=true" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "grade": 4,
+    "response_time_ms": 3000
+  }'
+```
+
 ---
 
 ## Notes
@@ -622,6 +884,20 @@ Create a new note.
 
 **Response:** `201 Created` (NoteRead)
 
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/notes?user_id=550e8400-e29b-41d4-a716-446655440001" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "title": "My Note",
+    "body": "Note content...",
+    "document_id": "550e8400-e29b-41d4-a716-446655440002",
+    "note_type": "summary",
+    "metadata": {}
+  }'
+```
+
 ---
 
 ### List Notes
@@ -636,6 +912,18 @@ List notes, optionally filtered by document or user.
 
 **Response:** `200 OK` (list of NoteRead)
 
+**cURL Example:**
+```bash
+# List all notes in workspace
+curl "http://localhost:8000/api/v1/notes?workspace_id=550e8400-e29b-41d4-a716-446655440000"
+
+# List notes for a specific document
+curl "http://localhost:8000/api/v1/notes?workspace_id=550e8400-e29b-41d4-a716-446655440000&document_id=550e8400-e29b-41d4-a716-446655440002"
+
+# List notes for a specific user
+curl "http://localhost:8000/api/v1/notes?workspace_id=550e8400-e29b-41d4-a716-446655440000&user_id=550e8400-e29b-41d4-a716-446655440001"
+```
+
 ---
 
 ### Get Note
@@ -647,6 +935,11 @@ Get a note by ID.
 - `note_id` (UUID): Note ID
 
 **Response:** `200 OK` (NoteRead)
+
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/notes/550e8400-e29b-41d4-a716-446655440013"
+```
 
 ---
 
@@ -670,6 +963,18 @@ Update a note.
 
 **Response:** `200 OK` (NoteRead)
 
+**cURL Example:**
+```bash
+curl -X PATCH "http://localhost:8000/api/v1/notes/550e8400-e29b-41d4-a716-446655440013" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Updated Title",
+    "body": "Updated content",
+    "note_type": "summary",
+    "metadata": {}
+  }'
+```
+
 ---
 
 ### Delete Note
@@ -681,6 +986,11 @@ Delete a note.
 - `note_id` (UUID): Note ID
 
 **Response:** `204 No Content`
+
+**cURL Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/notes/550e8400-e29b-41d4-a716-446655440013"
+```
 
 ---
 
@@ -700,6 +1010,18 @@ List concepts, optionally filtered by document or search query.
 
 **Response:** `200 OK` (list of ConceptRead)
 
+**cURL Example:**
+```bash
+# List all concepts in workspace
+curl "http://localhost:8000/api/v1/kg/concepts?workspace_id=550e8400-e29b-41d4-a716-446655440000&limit=20&offset=0"
+
+# Search concepts by name/description
+curl "http://localhost:8000/api/v1/kg/concepts?workspace_id=550e8400-e29b-41d4-a716-446655440000&q=machine%20learning"
+
+# Filter by document (when implemented)
+curl "http://localhost:8000/api/v1/kg/concepts?workspace_id=550e8400-e29b-41d4-a716-446655440000&document_id=550e8400-e29b-41d4-a716-446655440002"
+```
+
 ---
 
 ### Get Concept
@@ -711,6 +1033,11 @@ Get a concept by ID.
 - `concept_id` (UUID): Concept ID
 
 **Response:** `200 OK` (ConceptRead)
+
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/kg/concepts/550e8400-e29b-41d4-a716-446655440014"
+```
 
 ---
 
@@ -727,6 +1054,15 @@ Get neighboring concepts up to specified depth.
 
 **Response:** `200 OK` (list of ConceptRead)
 
+**cURL Example:**
+```bash
+# Get neighbors at depth 1
+curl "http://localhost:8000/api/v1/kg/concepts/550e8400-e29b-41d4-a716-446655440014/neighbors?depth=1"
+
+# Get neighbors at depth 2
+curl "http://localhost:8000/api/v1/kg/concepts/550e8400-e29b-41d4-a716-446655440014/neighbors?depth=2"
+```
+
 ---
 
 ### List KG Edges
@@ -741,6 +1077,15 @@ List KG edges, optionally filtered by concept.
 - `offset` (int, default: 0): Offset for pagination
 
 **Response:** `200 OK` (list of EdgeRead)
+
+**cURL Example:**
+```bash
+# List all edges in workspace
+curl "http://localhost:8000/api/v1/kg/edges?workspace_id=550e8400-e29b-41d4-a716-446655440000&limit=20&offset=0"
+
+# List edges for a specific concept
+curl "http://localhost:8000/api/v1/kg/edges?workspace_id=550e8400-e29b-41d4-a716-446655440000&concept_id=550e8400-e29b-41d4-a716-446655440014"
+```
 
 ---
 
@@ -780,6 +1125,28 @@ Perform semantic search across workspace documents.
 
 **Note:** Uses OpenAI `text-embedding-3-small` for query embeddings.
 
+**cURL Example:**
+```bash
+# Search across all documents in workspace
+curl -X POST "http://localhost:8000/api/v1/search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "query": "machine learning algorithms",
+    "top_k": 8
+  }'
+
+# Search within a specific document
+curl -X POST "http://localhost:8000/api/v1/search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "query": "neural networks",
+    "top_k": 5,
+    "document_id": "550e8400-e29b-41d4-a716-446655440002"
+  }'
+```
+
 ---
 
 ## Preferences
@@ -804,6 +1171,15 @@ Get user preferences, creating defaults if not exists.
 }
 ```
 
+**cURL Example:**
+```bash
+# Get preferences for a user
+curl "http://localhost:8000/api/v1/preferences?user_id=550e8400-e29b-41d4-a716-446655440001"
+
+# Get workspace-specific preferences
+curl "http://localhost:8000/api/v1/preferences?user_id=550e8400-e29b-41d4-a716-446655440001&workspace_id=550e8400-e29b-41d4-a716-446655440000"
+```
+
 ---
 
 ### Update User Preferences
@@ -826,6 +1202,18 @@ Update user preferences.
 ```
 
 **Response:** `200 OK` (PreferenceRead)
+
+**cURL Example:**
+```bash
+curl -X PATCH "http://localhost:8000/api/v1/preferences?user_id=550e8400-e29b-41d4-a716-446655440001&workspace_id=550e8400-e29b-41d4-a716-446655440000" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "auto_ingest_on_upload": false,
+    "auto_summary_after_ingest": true,
+    "auto_flashcards_after_ingest": true,
+    "default_flashcard_mode": "key_terms"
+  }'
+```
 
 ---
 
@@ -864,6 +1252,11 @@ Get an agent run by ID (includes step-by-step progress logs).
 }
 ```
 
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/agent-runs/550e8400-e29b-41d4-a716-446655440011"
+```
+
 ---
 
 ### List Agent Runs
@@ -880,6 +1273,27 @@ List agent runs, optionally filtered by workspace, user, agent, or status.
 - `offset` (int, default: 0): Offset for pagination
 
 **Response:** `200 OK` (list of AgentRunRead)
+
+**cURL Example:**
+```bash
+# List all agent runs
+curl "http://localhost:8000/api/v1/agent-runs?limit=20&offset=0"
+
+# Filter by workspace
+curl "http://localhost:8000/api/v1/agent-runs?workspace_id=550e8400-e29b-41d4-a716-446655440000"
+
+# Filter by user
+curl "http://localhost:8000/api/v1/agent-runs?user_id=550e8400-e29b-41d4-a716-446655440001"
+
+# Filter by agent name
+curl "http://localhost:8000/api/v1/agent-runs?agent_name=ingestion"
+
+# Filter by status
+curl "http://localhost:8000/api/v1/agent-runs?status=completed"
+
+# Combined filters
+curl "http://localhost:8000/api/v1/agent-runs?workspace_id=550e8400-e29b-41d4-a716-446655440000&agent_name=flashcard&status=running"
+```
 
 ---
 
@@ -906,6 +1320,17 @@ Add a member to a workspace.
 
 **Response:** `201 Created` (WorkspaceMemberRead)
 
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000/members" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "550e8400-e29b-41d4-a716-446655440012",
+    "role": "member",
+    "status": "active"
+  }'
+```
+
 ---
 
 ### List Workspace Members
@@ -917,6 +1342,11 @@ List all members of a workspace.
 - `workspace_id` (UUID): Workspace ID
 
 **Response:** `200 OK` (list of WorkspaceMemberRead)
+
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000/members"
+```
 
 ---
 
@@ -931,6 +1361,11 @@ Remove a member from a workspace.
 
 **Response:** `204 No Content`
 
+**cURL Example:**
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000/members/550e8400-e29b-41d4-a716-446655440015"
+```
+
 ---
 
 ## Authentication (Stubs)
@@ -942,12 +1377,32 @@ All auth endpoints return `501 Not Implemented`. These are placeholders for futu
 
 **Status:** `501 Not Implemented`
 
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/signup" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "password123"
+  }'
+```
+
 ---
 
 ### Login
 **POST** `/api/v1/auth/login`
 
 **Status:** `501 Not Implemented`
+
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "password123"
+  }'
+```
 
 ---
 
@@ -956,12 +1411,22 @@ All auth endpoints return `501 Not Implemented`. These are placeholders for futu
 
 **Status:** `501 Not Implemented`
 
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/logout"
+```
+
 ---
 
 ### Get Current User
 **GET** `/api/v1/auth/me`
 
 **Status:** `501 Not Implemented`
+
+**cURL Example:**
+```bash
+curl "http://localhost:8000/api/v1/auth/me"
+```
 
 ---
 
