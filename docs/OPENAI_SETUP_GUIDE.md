@@ -214,6 +214,39 @@ print(response.choices[0].message.content)
 
 ---
 
+## Complete API Routes Reference
+
+### Routes Using OpenAI
+
+| Route | Method | OpenAI Usage | Model |
+|-------|--------|--------------|-------|
+| `/api/v1/chat` | POST | Chat completions + Embeddings | `gpt-4o-mini` + `text-embedding-3-small` |
+| `/api/v1/documents/{id}/ingest` | POST | Embeddings + Optional summaries | `text-embedding-3-small` + `gpt-4o-mini` |
+| `/api/v1/documents/{id}/flashcards` | POST | Chat completions | `gpt-4o-mini` |
+| `/api/v1/documents/{id}/kg` | POST | Chat completions | `gpt-4o-mini` |
+| `/api/v1/documents/{id}/summary` | POST | Chat completions | `gpt-4o-mini` |
+| `/api/v1/search` | POST | Embeddings | `text-embedding-3-small` |
+
+### Routes NOT Using OpenAI
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/health` | GET | Health check |
+| `/api/v1/workspaces` | GET, POST, PATCH, DELETE | Workspace management |
+| `/api/v1/documents` | GET, POST, PATCH, DELETE | Document CRUD |
+| `/api/v1/flashcards` | GET, POST | Flashcard management |
+| `/api/v1/flashcards/{id}/review` | POST | SRS review tracking |
+| `/api/v1/notes` | GET, POST, PATCH, DELETE | Notes management |
+| `/api/v1/preferences` | GET, PATCH | User preferences |
+| `/api/v1/agent-runs` | GET | Agent run status |
+| `/api/v1/kg/concepts` | GET | Knowledge graph concepts |
+| `/api/v1/kg/edges` | GET | Knowledge graph edges |
+| `/api/v1/workspace-members` | GET, POST, DELETE | Workspace membership |
+
+For complete API documentation, visit: `http://localhost:8000/docs` (Swagger UI)
+
+---
+
 ## Quick Checklist
 
 - [ ] Created API key at https://platform.openai.com/api-keys
@@ -221,11 +254,18 @@ print(response.choices[0].message.content)
 - [ ] Added payment method at https://platform.openai.com/account/billing
 - [ ] Set usage limits (optional but recommended)
 - [ ] Verified `.env` has both `OPENAI_MODEL` and `OPENAI_EMBEDDING_MODEL`
-- [ ] Tested connection (optional)
+- [ ] Tested health endpoint: `curl http://localhost:8000/health`
+- [ ] Tested document ingestion (uses embeddings)
+- [ ] Tested chat endpoint (uses embeddings + chat)
 
 ---
 
 **You're all set!** Your configuration is ready:
-- ✅ `OPENAI_MODEL=gpt-4o-mini` (for chat/LLM)
+- ✅ `OPENAI_MODEL=gpt-4o-mini` (for chat/LLM operations)
 - ✅ `OPENAI_EMBEDDING_MODEL=text-embedding-3-small` (for embeddings)
+
+**Next Steps:**
+1. Start your server: `make run`
+2. Visit API docs: `http://localhost:8000/docs`
+3. Test endpoints using the examples above
 
