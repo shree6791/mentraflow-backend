@@ -20,7 +20,7 @@
 9. [Preferences](#preferences)
 10. [Agent Runs](#agent-runs)
 11. [Workspace Members](#workspace-members)
-12. [Authentication](#authentication-stubs)
+12. [Authentication](#authentication)
 
 ---
 
@@ -52,12 +52,12 @@ curl http://localhost:8000/health
 ## Workspaces
 
 ### Create Workspace
-**POST** `/api/v1/workspaces?owner_user_id={user_id}`
+**POST** `/api/v1/workspaces?owner_username={username}`
 
 Create a new workspace.
 
 **Query Parameters:**
-- `owner_user_id` (UUID, required): Owner user ID
+- `owner_username` (string, required): Owner username (e.g., "shree6791")
 
 **Request Body:**
 ```json
@@ -78,9 +78,13 @@ Create a new workspace.
 }
 ```
 
+**Error Responses:**
+- `400 Bad Request`: Missing `owner_username` parameter
+- `404 Not Found`: User with provided username not found (suggest signing up first)
+
 **cURL Example:**
 ```bash
-curl -X POST "http://localhost:8000/api/v1/workspaces?owner_user_id=550e8400-e29b-41d4-a716-446655440001" \
+curl -X POST "http://localhost:8000/api/v1/workspaces?owner_username=shree6791" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "My Workspace",
@@ -1385,31 +1389,82 @@ curl -X DELETE "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-
 
 ---
 
-## Authentication (Stubs)
+## Authentication
 
-All auth endpoints return `501 Not Implemented`. These are placeholders for future implementation.
+Authentication endpoints support both Google Sign-In and username/password authentication. When a user is created (via signup or first-time Google login), default user preferences are automatically created.
 
-### Signup
+### Signup (Email/Password)
 **POST** `/api/v1/auth/signup`
 
-**Status:** `501 Not Implemented`
+Create a new user account with username, email and password. Automatically creates default user preferences.
+
+**Request Body:**
+```json
+{
+  "username": "shree6791",
+  "email": "user@example.com",
+  "password": "password123",
+  "full_name": "John Doe",
+  "display_name": "John"
+}
+```
+
+**Response:** `201 Created`
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440001",
+  "username": "shree6791",
+  "email": "user@example.com",
+  "full_name": "John Doe",
+  "display_name": "John",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+**Note:** Password hashing and JWT token generation are placeholders (TODO: implement with bcrypt and python-jose).
 
 **cURL Example:**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/auth/signup" \
   -H "Content-Type: application/json" \
   -d '{
+    "username": "shree6791",
     "email": "user@example.com",
-    "password": "password123"
+    "password": "password123",
+    "full_name": "John Doe",
+    "display_name": "John"
   }'
 ```
 
 ---
 
-### Login
+### Login (Email/Password)
 **POST** `/api/v1/auth/login`
 
-**Status:** `501 Not Implemented`
+Login with email and password. If user doesn't exist, creates user automatically (first-time login).
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440001",
+  "email": "user@example.com",
+  "full_name": "John Doe",
+  "display_name": "John",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+**Note:** Password verification and JWT token generation are placeholders (TODO: implement).
 
 **cURL Example:**
 ```bash
@@ -1423,10 +1478,60 @@ curl -X POST "http://localhost:8000/api/v1/auth/login" \
 
 ---
 
+### Google Sign-In
+**POST** `/api/v1/auth/google`
+
+Authenticate with Google Sign-In. Verifies Google ID token and creates/updates user. Automatically creates default user preferences for new users.
+
+**Request Body:**
+```json
+{
+  "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ij...",
+  "email": "user@gmail.com",
+  "full_name": "John Doe",
+  "display_name": "John"
+}
+```
+
+**Response:** `201 Created` (new user) or `200 OK` (existing user)
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440001",
+  "email": "user@gmail.com",
+  "full_name": "John Doe",
+  "display_name": "John",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+**Note:** Google ID token verification and JWT token generation are placeholders (TODO: implement with google-auth and python-jose).
+
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/google" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ij...",
+    "email": "user@gmail.com",
+    "full_name": "John Doe",
+    "display_name": "John"
+  }'
+```
+
+---
+
 ### Logout
 **POST** `/api/v1/auth/logout`
 
-**Status:** `501 Not Implemented`
+Logout endpoint. With JWT tokens, logout is typically handled client-side by removing the token.
+
+**Response:** `200 OK`
+```json
+{
+  "message": "Logged out successfully"
+}
+```
 
 **cURL Example:**
 ```bash
@@ -1436,18 +1541,60 @@ curl -X POST "http://localhost:8000/api/v1/auth/logout"
 ---
 
 ### Get Current User
-**GET** `/api/v1/auth/me`
+**GET** `/api/v1/auth/me?user_id={user_id}`
 
-**Status:** `501 Not Implemented`
+Get current authenticated user information.
+
+**Query Parameters:**
+- `user_id` (UUID, required): User ID (TODO: Extract from JWT token instead of query parameter)
+
+**Response:** `200 OK`
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440001",
+  "email": "user@example.com",
+  "full_name": "John Doe",
+  "display_name": "John",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+**Note:** Currently requires `user_id` query parameter. TODO: Extract from JWT token in Authorization header.
 
 **cURL Example:**
 ```bash
-curl "http://localhost:8000/api/v1/auth/me"
+curl "http://localhost:8000/api/v1/auth/me?user_id=550e8400-e29b-41d4-a716-446655440001"
 ```
 
 ---
 
 ## Complete Testing Flow
+
+### Step 0: Sign Up / Login (Optional)
+```bash
+# Sign up with email/password
+curl -X POST "http://localhost:8000/api/v1/auth/signup" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "shree6791",
+    "email": "user@example.com",
+    "password": "password123",
+    "full_name": "Test User"
+  }'
+
+# Or login
+curl -X POST "http://localhost:8000/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "password123"
+  }'
+
+# Save the username from the response for subsequent requests (e.g., "shree6791")
+```
+
+**Note:** When a user signs up or logs in for the first time, default user preferences are automatically created. Use the `username` from the response for workspace creation.
 
 ### Step 1: Health Check
 ```bash
@@ -1456,7 +1603,7 @@ curl http://localhost:8000/health
 
 ### Step 2: Create a Workspace
 ```bash
-curl -X POST "http://localhost:8000/api/v1/workspaces?owner_user_id=550e8400-e29b-41d4-a716-446655440001" \
+curl -X POST "http://localhost:8000/api/v1/workspaces?owner_username=shree6791" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "My Study Workspace",
@@ -1569,5 +1716,5 @@ curl -X POST "http://localhost:8000/api/v1/flashcards/{flashcard_id}/review" \
 | Preferences | Get, Update | 2 |
 | Agent Runs | Get, List | 2 |
 | Workspace Members | Add, List, Remove | 3 |
-| Authentication | Stubs (501) | 4 |
-| **Total** | | **45 routes** |
+| Authentication | Signup, Login, Google, Logout, Me | 5 |
+| **Total** | | **46 routes** |

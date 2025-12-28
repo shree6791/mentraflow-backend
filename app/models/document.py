@@ -51,7 +51,7 @@ class Document(Base):
     last_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
     )  # Last agent run ID (for tracking async progress)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    meta_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, name="metadata")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=func.now(),

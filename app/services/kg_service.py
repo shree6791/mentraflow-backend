@@ -49,7 +49,7 @@ class KGService:
                     concept.type = concept_data.get("type")
                     concept.aliases = concept_data.get("aliases")
                     concept.tags = concept_data.get("tags")
-                    concept.metadata = concept_data.get("metadata")
+                    concept.meta_data = concept_data.get("metadata")
                 else:
                     # Create new
                     concept = Concept(
@@ -60,7 +60,7 @@ class KGService:
                         type=concept_data.get("type"),
                         aliases=concept_data.get("aliases"),
                         tags=concept_data.get("tags"),
-                        metadata=concept_data.get("metadata"),
+                        meta_data=concept_data.get("metadata"),
                     )
                     self.db.add(concept)
 

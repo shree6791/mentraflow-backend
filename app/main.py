@@ -3,6 +3,12 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+# Disable LangSmith tracing to avoid Python 3.12 compatibility issues
+# This must be set before importing langchain/langgraph modules
+# Note: This doesn't prevent the import, but reduces the chance of issues
+if "LANGCHAIN_TRACING_V2" not in os.environ:
+    os.environ["LANGCHAIN_TRACING_V2"] = "false"
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -12,7 +18,21 @@ from app.api.v1.router import api_router
 from app.infrastructure.database import check_db_connection, create_tables, drop_tables
 from app.infrastructure.qdrant import check_qdrant_connection
 
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG if settings.DEBUG else logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
 logger = logging.getLogger(__name__)
+
+# Enable debug logging for specific modules in debug mode
+if settings.DEBUG:
+    logging.getLogger("app").setLevel(logging.DEBUG)
+    logging.getLogger("uvicorn").setLevel(logging.DEBUG)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)  # SQL queries
+    logger.info("🐛 Debug mode enabled - verbose logging active")
 
 
 @asynccontextmanager
@@ -79,6 +99,7 @@ app = FastAPI(
     version=settings.VERSION,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan,
+    debug=settings.DEBUG,  # Enable FastAPI debug mode
 )
 
 # CORS middleware

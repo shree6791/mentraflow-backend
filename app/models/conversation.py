@@ -39,7 +39,7 @@ class Conversation(Base):
         nullable=False,
     )
     title: Mapped[str | None] = mapped_column(Text, nullable=True)  # Auto-generated from first message
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    meta_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, name="metadata")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=func.now(),
@@ -82,7 +82,7 @@ class ConversationMessage(Base):
     role: Mapped[str] = mapped_column(Text, nullable=False)  # "user" or "assistant"
     content: Mapped[str] = mapped_column(Text, nullable=False)
     citations: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)  # Citations for assistant messages
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # Additional metadata (e.g., confidence_score)
+    meta_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, name="metadata")  # Additional metadata (e.g., confidence_score)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=func.now(),

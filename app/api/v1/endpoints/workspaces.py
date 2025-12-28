@@ -17,23 +17,38 @@ router = APIRouter()
     "/workspaces",
     response_model=WorkspaceRead,
     status_code=201,
-    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
     summary="Create a new workspace",
 )
 async def create_workspace(
     request: WorkspaceCreate,
-    owner_user_id: Annotated[uuid.UUID, Query(description="Owner user ID")],  # TODO: Get from auth
+    owner_username: Annotated[str, Query(description="Owner username")],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceRead:
-    """Create a new workspace."""
+    """Create a new workspace.
+    
+    The owner is identified by username (e.g., "shree6791").
+    """
     try:
+        # Look up user by username
+        from app.services.user_service import UserService
+        user_service = UserService(db)
+        user = await user_service.get_user_by_username(owner_username)
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail=f"User with username '{owner_username}' not found. Please sign up first.",
+            )
+        
         service = WorkspaceService(db)
         workspace = await service.create_workspace(
-            owner_user_id=owner_user_id,
+            owner_user_id=user.id,
             name=request.name,
             plan_tier=request.plan_tier,
         )
         return WorkspaceRead.model_validate(workspace)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

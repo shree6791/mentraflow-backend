@@ -1,6 +1,7 @@
 # FastAPI and server
-fastapi==0.104.1
+fastapi>=0.115.0  # Updated for Pydantic 2.8.0+ compatibility
 uvicorn[standard]==0.24.0
+python-multipart>=0.0.6  # Required for file uploads and Form data
 
 # Database
 sqlalchemy[asyncio]==2.0.23
@@ -8,8 +9,9 @@ asyncpg==0.29.0
 alembic==1.12.1
 
 # Configuration
-pydantic==2.5.0
-pydantic-settings==2.1.0
+pydantic>=2.8.0  # Updated for Python 3.12 compatibility (fixes ForwardRef._evaluate issue)
+pydantic-settings>=2.1.0
+email-validator>=2.0.0  # Required for Pydantic EmailStr validation
 
 # Development tools
 ruff==0.1.6
@@ -25,11 +27,26 @@ httpx==0.25.1
 qdrant-client>=1.6.0
 
 # LangChain
+# Using versions compatible with Python 3.12
+# Note: langchain-core 0.1.x uses langsmith which has Pydantic v1 compatibility issues with Python 3.12
+# We keep 0.1.x for now but disable LangSmith tracing to minimize issues
 langchain>=0.1.0
 langchain-openai>=0.1.0
 langchain-core>=0.1.7,<0.2.0
 langgraph>=0.0.40
+# Note: langsmith is installed as a dependency of langchain-core
+# To avoid Python 3.12 compatibility issues, disable tracing: LANGCHAIN_TRACING_V2=false
 
 # OpenAI client for embeddings
 openai>=1.0.0
+
+# File processing
+pypdf>=3.0.0  # PDF text extraction
+python-docx>=1.0.0  # DOC/DOCX text extraction
+python-multipart>=0.0.6  # Required for FastAPI file uploads and Form data
+
+# Authentication & Security
+bcrypt>=4.0.0  # Password hashing
+python-jose[cryptography]>=3.3.0  # JWT token generation and verification
+google-auth>=2.23.0  # Google Sign-In token verification
 

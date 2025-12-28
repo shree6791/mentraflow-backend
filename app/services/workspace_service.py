@@ -22,7 +22,11 @@ class WorkspaceService:
         name: str,
         plan_tier: str | None = None,
     ) -> Workspace:
-        """Create a new workspace."""
+        """Create a new workspace and automatically add owner as workspace member.
+        
+        When a workspace is created, the owner is automatically added as a workspace
+        member with role="owner" and status="active".
+        """
         try:
             workspace = Workspace(
                 owner_user_id=owner_user_id,
@@ -30,6 +34,18 @@ class WorkspaceService:
                 plan_tier=plan_tier,
             )
             self.db.add(workspace)
+            await self.db.flush()  # Flush to get workspace.id before commit
+            
+            # Automatically add owner as workspace member
+            from app.models.workspace_membership import WorkspaceMembership
+            membership = WorkspaceMembership(
+                workspace_id=workspace.id,
+                user_id=owner_user_id,
+                role="owner",
+                status="active",
+            )
+            self.db.add(membership)
+            
             await self.db.commit()
             await self.db.refresh(workspace)
             return workspace

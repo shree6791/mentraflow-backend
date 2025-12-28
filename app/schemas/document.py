@@ -32,11 +32,16 @@ class DocumentRead(BaseModel):
     content: str | None = Field(default=None, description="Document content")
     summary_text: str | None = Field(default=None, description="Auto-generated summary")
     last_run_id: uuid.UUID | None = Field(default=None, description="Last agent run ID")
-    metadata: dict[str, Any] | None = Field(default=None, description="Additional metadata")
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Additional metadata",
+        alias="meta_data",  # Read from model's meta_data attribute
+        serialization_alias="metadata",  # Serialize as metadata in API response
+    )
     created_at: datetime = Field(description="Document creation timestamp")
     updated_at: datetime = Field(description="Document last update timestamp")
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class DocumentStatusUpdate(BaseModel):

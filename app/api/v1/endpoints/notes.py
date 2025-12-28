@@ -44,7 +44,7 @@ async def create_note(
             source_document_id=request.document_id,
             note_type=request.note_type,
             title=request.title,
-            metadata=request.metadata,
+            meta_data=request.metadata,
         )
         return NoteRead.model_validate(note)
     except ValueError as e:
@@ -133,7 +133,7 @@ async def update_note(
         if request.note_type is not None:
             note.note_type = request.note_type
         if request.metadata is not None:
-            note.metadata = request.metadata
+            note.meta_data = request.metadata
         
         await db.commit()
         await db.refresh(note)

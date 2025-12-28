@@ -57,7 +57,7 @@ class Flashcard(Base):
         UUID(as_uuid=True), nullable=True
     )  # Batch/generation ID to group cards from same generation run
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    meta_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, name="metadata")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=func.now(),

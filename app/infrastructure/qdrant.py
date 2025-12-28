@@ -350,11 +350,19 @@ async def check_qdrant_connection() -> bool:
     Returns:
         True if connection is successful, False otherwise
     """
+    import asyncio
+    
     try:
-        # Try to get collections list (simple operation to test connection)
-        qdrant_client.client.get_collections()
+        # Run synchronous Qdrant call in thread pool with timeout (5 second timeout)
+        await asyncio.wait_for(
+            asyncio.to_thread(qdrant_client.client.get_collections),
+            timeout=5.0
+        )
         logger.info("✅ Qdrant connection successful")
         return True
+    except asyncio.TimeoutError:
+        logger.error("❌ Qdrant connection timeout (server may be unreachable)")
+        return False
     except Exception as e:
         logger.error(f"❌ Qdrant connection failed: {str(e)}")
         return False

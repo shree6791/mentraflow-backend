@@ -65,7 +65,7 @@ class DocumentService:
                 title=title,
                 doc_type=source_type,
                 source_url=source_uri,
-                metadata=metadata,
+                meta_data=metadata,
                 status="pending",
                 content_hash=content_hash,
             )
@@ -139,7 +139,7 @@ class DocumentService:
             if summary_text is not None:
                 document.summary_text = summary_text
             if metadata is not None:
-                document.metadata = metadata
+                document.meta_data = metadata
             
             await self.db.commit()
             await self.db.refresh(document)

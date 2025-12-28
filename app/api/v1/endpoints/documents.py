@@ -1,10 +1,15 @@
 """Document processing endpoints."""
 import uuid
+import io
+import logging
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Path, Query
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, Header, HTTPException, Path, Query, Request, UploadFile
+from fastapi import status as fastapi_status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.agents.router import AgentRouter
 from app.agents.types import (
@@ -34,6 +39,181 @@ def get_request_id(x_request_id: Annotated[str | None, Header()] = None) -> str:
     return x_request_id or str(uuid_lib.uuid4())
 
 
+async def _extract_text_from_file(file: UploadFile, file_content: bytes) -> str:
+    """Extract text content from uploaded file.
+    
+    Args:
+        file: Uploaded file object
+        file_content: Raw file content bytes
+        
+    Returns:
+        Extracted text content
+        
+    Raises:
+        HTTPException: If file type is unsupported or extraction fails
+    """
+    file_extension = file.filename.split(".")[-1].lower() if "." in file.filename else ""
+    
+    if file_extension == "pdf":
+        try:
+            import pypdf
+            pdf_reader = pypdf.PdfReader(io.BytesIO(file_content))
+            extracted_text = "\n".join([page.extract_text() for page in pdf_reader.pages])
+            if not extracted_text.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="PDF file appears to be empty or contains no extractable text",
+                )
+            return extracted_text
+        except ImportError:
+            raise HTTPException(
+                status_code=500,
+                detail="PDF extraction requires 'pypdf' library. Install with: pip install pypdf",
+            )
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF: {str(e)}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to extract text from PDF: {str(e)}",
+            )
+    
+    elif file_extension in ["doc", "docx"]:
+        try:
+            from docx import Document as DocxDocument
+            docx_file = DocxDocument(io.BytesIO(file_content))
+            extracted_text = "\n".join([paragraph.text for paragraph in docx_file.paragraphs])
+            if not extracted_text.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="DOC/DOCX file appears to be empty or contains no extractable text",
+                )
+            return extracted_text
+        except ImportError:
+            logger.warning("python-docx not installed, attempting to read DOC/DOCX as text")
+            try:
+                return file_content.decode("utf-8", errors="ignore")
+            except Exception:
+                raise HTTPException(
+                    status_code=500,
+                    detail="DOC/DOCX extraction requires 'python-docx' library. Install with: pip install python-docx",
+                )
+        except Exception as e:
+            logger.error(f"Error extracting text from DOC/DOCX: {str(e)}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to extract text from DOC/DOCX: {str(e)}",
+            )
+    
+    elif file_extension in ["txt", "md", "text"]:
+        try:
+            return file_content.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                return file_content.decode("latin-1")
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to decode text file: {str(e)}",
+                )
+    else:
+        # Try to decode as text for unknown extensions
+        try:
+            return file_content.decode("utf-8")
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_extension}. Supported: PDF, DOC, DOCX, TXT, MD",
+            )
+
+
+async def _parse_json_request(http_request: Request) -> tuple[uuid.UUID, uuid.UUID, str | None, str | None, str | None, dict, str]:
+    """Parse JSON request body.
+    
+    Returns:
+        Tuple of (workspace_id, user_id, title, doc_type, source_uri, metadata, content)
+    """
+    body = await http_request.json()
+    request = CreateDocumentRequest(**body)
+    
+    if not request.content:
+        raise HTTPException(
+            status_code=400,
+            detail="'content' field is required in JSON body",
+        )
+    
+    return (
+        request.workspace_id,
+        request.user_id,
+        request.title,
+        request.doc_type,
+        request.source_url,
+        request.metadata or {},
+        request.content,
+    )
+
+
+async def _parse_multipart_request(http_request: Request) -> tuple[uuid.UUID, uuid.UUID, str | None, str | None, str | None, dict, str]:
+    """Parse multipart/form-data request.
+    
+    Returns:
+        Tuple of (workspace_id, user_id, title, doc_type, source_uri, metadata, extracted_text)
+    """
+    form = await http_request.form()
+    file = form.get("file")
+    workspace_id_str = form.get("workspace_id")
+    user_id_str = form.get("user_id")
+    title = form.get("title")
+    
+    if not file:
+        raise HTTPException(
+            status_code=400,
+            detail="'file' field is required for file uploads",
+        )
+    
+    if not workspace_id_str or not user_id_str:
+        raise HTTPException(
+            status_code=400,
+            detail="workspace_id and user_id are required when uploading a file (use Form fields)",
+        )
+    
+    try:
+        resolved_workspace_id = uuid.UUID(str(workspace_id_str))
+        resolved_user_id = uuid.UUID(str(user_id_str))
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="workspace_id and user_id must be valid UUIDs",
+        )
+    
+    # Read file content
+    file_content = await file.read()
+    file_extension = file.filename.split(".")[-1].lower() if "." in file.filename else ""
+    doc_type = file_extension or "file"
+    source_uri = file.filename
+    metadata = {"original_filename": file.filename, "file_size": len(file_content)}
+    
+    # Extract text from file
+    extracted_text = await _extract_text_from_file(file, file_content)
+    
+    if not extracted_text or not extracted_text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="File appears to be empty or contains no extractable text",
+        )
+    
+    doc_title = str(title) if title else file.filename or "Uploaded Document"
+    
+    return (
+        resolved_workspace_id,
+        resolved_user_id,
+        doc_title,
+        doc_type,
+        source_uri,
+        metadata,
+        extracted_text,
+    )
+
+
 class CreateDocumentRequest(DocumentCreate):
     """Request body for creating a document (extends DocumentCreate with user_id)."""
     
@@ -48,32 +228,140 @@ class CreateDocumentRequest(DocumentCreate):
         400: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
-    summary="Create a new document",
-    description="Create a new document in a workspace. Returns the created document with its ID.",
+    summary="Create a new document (text or file upload)",
+    description="Create a document by either providing text content (JSON) or uploading a file (multipart/form-data). Supports PDF, DOC, TXT, MD files. If preferences.auto_ingest_on_upload=true, ingestion will be triggered automatically.",
     status_code=201,
 )
 async def create_document(
-    request: CreateDocumentRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    request_id: Annotated[str, Depends(get_request_id)],
+    http_request: Request,
+    background_tasks: BackgroundTasks = None,
+    agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    request_id: Annotated[str, Depends(get_request_id)] = None,
 ) -> DocumentRead:
-    """Create a new document."""
+    """Create a new document.
+    
+    Supports two modes:
+    1. JSON mode: Send text content in JSON body (Content-Type: application/json)
+       - Include workspace_id, user_id, title, content, etc. in JSON
+    2. File upload mode: Upload a file (Content-Type: multipart/form-data)
+       - Include workspace_id, user_id, title as Form fields
+       - Include file as File field
+    
+    Supported file types:
+    - PDF (.pdf) - extracts text using pypdf
+    - DOC/DOCX (.doc, .docx) - extracts text using python-docx
+    - Text files (.txt, .md, etc.) - read directly
+    """
     try:
+        # Parse request based on content type
+        content_type = http_request.headers.get("content-type", "").lower()
+        
+        if "application/json" in content_type:
+            workspace_id, user_id, title, doc_type, source_uri, metadata, extracted_text = await _parse_json_request(http_request)
+        elif "multipart/form-data" in content_type:
+            workspace_id, user_id, title, doc_type, source_uri, metadata, extracted_text = await _parse_multipart_request(http_request)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Content-Type must be either 'application/json' or 'multipart/form-data'",
+            )
+        
+        # Validate workspace and user exist before creating document
+        from app.services.workspace_service import WorkspaceService
+        from app.services.user_service import UserService
+        
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(workspace_id)
+        if not workspace:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Workspace {workspace_id} not found. Please create a workspace first.",
+            )
+        
+        user_service = UserService(db)
+        user = await user_service.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail=f"User {user_id} not found. Please sign up first.",
+            )
+        
+        # Create document with text content (service will compute hash and store content)
         document_service = DocumentService(db)
         document = await document_service.create_document(
-            workspace_id=request.workspace_id,
-            user_id=request.user_id,
-            title=request.title,
-            source_type=request.doc_type,
-            source_uri=request.source_url,
-            metadata=request.metadata,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            title=title,
+            source_type=doc_type,
+            source_uri=source_uri,
+            metadata=metadata,
+            raw_text=extracted_text if extracted_text and extracted_text.strip() else None,
         )
         
-        # Store raw text if provided
-        if request.content:
-            document = await document_service.store_raw_text(document.id, request.content)
+        # Store text content if not already stored by create_document
+        # Note: create_document only computes hash, doesn't store content
+        if extracted_text and extracted_text.strip():
+            document = await document_service.store_raw_text(document.id, extracted_text)
         
-        return DocumentRead.model_validate(document)
+        # Refresh document to ensure all fields are loaded (services already committed)
+        # This ensures created_at, updated_at, etc. are populated
+        await db.refresh(document)
+        
+        # Check preferences for auto-ingest
+        try:
+            from app.services.user_preference_service import UserPreferenceService
+            pref_service = UserPreferenceService(db)
+            preferences = await pref_service.get_preferences(user_id=user_id)
+            
+            if preferences.auto_ingest_on_upload and extracted_text:
+                # Trigger auto-ingest in background
+                input_data = IngestionAgentInput(
+                    document_id=document.id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    raw_text=None,  # Already stored
+                )
+                agent_run_service = AgentRunService(db)
+                input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
+                agent_run = await agent_run_service.create_run(
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    agent_name="ingestion",
+                    input_json=input_json,
+                    status="queued",
+                )
+                document.last_run_id = agent_run.id
+                await db.commit()
+                await db.refresh(document)
+                
+                add_agent_task(
+                    background_tasks,
+                    "ingestion",
+                    agent_router.run_ingestion,
+                    input_data,
+                    agent_run.id,
+                    db,
+                )
+        except Exception as pref_error:
+            # If preferences or auto-ingest fails, log but don't fail the document creation
+            # Document is already saved by the services
+            logger.warning(f"Failed to check preferences or trigger auto-ingest: {str(pref_error)}", exc_info=True)
+            # Refresh document one more time to ensure it's up to date
+            await db.refresh(document)
+        
+        # Validate and return document
+        try:
+            return DocumentRead.model_validate(document)
+        except Exception as validation_error:
+            logger.error(f"Failed to validate document response [request_id={request_id}]: {str(validation_error)}", exc_info=True)
+            # Return basic document info even if validation fails
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error serializing document response [request_id={request_id}]: {str(validation_error)}",
+            )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -181,7 +469,7 @@ async def ingest_document(
     if async_mode:
         try:
             agent_run_service = AgentRunService(db)
-            input_json = input_data.model_dump()
+            input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
             agent_run = await agent_run_service.create_run(
                 workspace_id=request_body.workspace_id,
                 user_id=request_body.user_id,
@@ -320,7 +608,7 @@ async def generate_flashcards(
     if async_mode:
         try:
             agent_run_service = AgentRunService(db)
-            input_json = input_data.model_dump()
+            input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
             agent_run = await agent_run_service.create_run(
                 workspace_id=request_body.workspace_id,
                 user_id=request_body.user_id,
@@ -426,7 +714,7 @@ async def extract_kg(
     if async_mode:
         try:
             agent_run_service = AgentRunService(db)
-            input_json = input_data.model_dump()
+            input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
             agent_run = await agent_run_service.create_run(
                 workspace_id=request_body.workspace_id,
                 user_id=request_body.user_id,
@@ -482,62 +770,192 @@ async def extract_kg(
     response_model=DocumentRead,
     status_code=201,
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Create a document in a workspace",
-    description="Create a document in a workspace. If preferences.auto_ingest_on_upload=true, ingestion will be triggered automatically.",
+    summary="Create a document in a workspace (text or file upload)",
+    description="Create a document by either providing text content (JSON) or uploading a file (multipart/form-data). Supports PDF, DOC, TXT, MD files. If preferences.auto_ingest_on_upload=true, ingestion will be triggered automatically.",
 )
 async def create_workspace_document(
     workspace_id: Annotated[uuid.UUID, Path(description="Workspace ID")],
-    request: CreateDocumentRequest,
-    background_tasks: BackgroundTasks,
+    # For JSON requests (text content)
+    request: Annotated[CreateDocumentRequest | None, Body()] = None,
+    # For file uploads (multipart/form-data)
+    file: Annotated[UploadFile | None, File(description="File to upload (PDF, DOC, TXT, MD, etc.)")] = None,
+    user_id: Annotated[uuid.UUID | None, Form(description="User ID (required for file uploads)")] = None,
+    title: Annotated[str | None, Form(description="Document title (optional for file uploads)")] = None,
+    background_tasks: BackgroundTasks = None,
     agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
     request_id: Annotated[str, Depends(get_request_id)] = None,
 ) -> DocumentRead:
-    """Create a document in a workspace, optionally auto-ingesting."""
+    """Create a document in a workspace.
+    
+    Supports two modes:
+    1. JSON mode: Send text content in JSON body (Content-Type: application/json)
+    2. File upload mode: Upload a file (Content-Type: multipart/form-data)
+    
+    Supported file types:
+    - PDF (.pdf) - extracts text using pypdf
+    - DOC/DOCX (.doc, .docx) - extracts text (requires python-docx)
+    - Text files (.txt, .md, etc.) - read directly
+    """
     try:
-        # Verify workspace_id matches
-        if request.workspace_id != workspace_id:
-            raise HTTPException(status_code=400, detail="Workspace ID mismatch")
+        extracted_text = None
+        doc_title = None
+        doc_type = None
+        source_uri = None
+        metadata = {}
+        resolved_user_id = None
         
+        # Determine mode: file upload or JSON text
+        if file:
+            # File upload mode
+            if not user_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="user_id is required when uploading a file (use Form field)",
+                )
+            
+            resolved_user_id = user_id
+            doc_title = title or file.filename or "Uploaded Document"
+            
+            # Read file content
+            file_content = await file.read()
+            file_extension = file.filename.split(".")[-1].lower() if "." in file.filename else ""
+            doc_type = file_extension or "file"
+            source_uri = file.filename
+            metadata = {"original_filename": file.filename, "file_size": len(file_content)}
+            
+            # Extract text based on file type
+            if file_extension == "pdf":
+                try:
+                    import pypdf
+                    pdf_reader = pypdf.PdfReader(io.BytesIO(file_content))
+                    extracted_text = "\n".join([page.extract_text() for page in pdf_reader.pages])
+                    if not extracted_text.strip():
+                        raise HTTPException(
+                            status_code=400,
+                            detail="PDF file appears to be empty or contains no extractable text",
+                        )
+                except ImportError:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="PDF extraction requires 'pypdf' library. Install with: pip install pypdf",
+                    )
+                except Exception as e:
+                    logger.error(f"Error extracting text from PDF: {str(e)}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Failed to extract text from PDF: {str(e)}",
+                    )
+            elif file_extension in ["doc", "docx"]:
+                try:
+                    from docx import Document as DocxDocument
+                    docx_file = DocxDocument(io.BytesIO(file_content))
+                    extracted_text = "\n".join([paragraph.text for paragraph in docx_file.paragraphs])
+                    if not extracted_text.strip():
+                        raise HTTPException(
+                            status_code=400,
+                            detail="DOC/DOCX file appears to be empty or contains no extractable text",
+                        )
+                except ImportError:
+                    # Fallback: try to read as text if python-docx not available
+                    logger.warning("python-docx not installed, attempting to read DOC/DOCX as text")
+                    try:
+                        extracted_text = file_content.decode("utf-8", errors="ignore")
+                    except Exception:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="DOC/DOCX extraction requires 'python-docx' library. Install with: pip install python-docx",
+                        )
+                except Exception as e:
+                    logger.error(f"Error extracting text from DOC/DOCX: {str(e)}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Failed to extract text from DOC/DOCX: {str(e)}",
+                    )
+            elif file_extension in ["txt", "md", "text"]:
+                # Read as text
+                try:
+                    extracted_text = file_content.decode("utf-8")
+                except UnicodeDecodeError:
+                    try:
+                        extracted_text = file_content.decode("latin-1")
+                    except Exception as e:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Failed to decode text file: {str(e)}",
+                        )
+            else:
+                # Try to decode as text for unknown extensions
+                try:
+                    extracted_text = file_content.decode("utf-8")
+                except Exception:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Unsupported file type: {file_extension}. Supported: PDF, DOC, DOCX, TXT, MD",
+                    )
+            
+            if not extracted_text or not extracted_text.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="File appears to be empty or contains no extractable text",
+                )
+        
+        elif request:
+            # JSON text mode
+            if request.workspace_id != workspace_id:
+                raise HTTPException(status_code=400, detail="Workspace ID mismatch")
+            
+            resolved_user_id = request.user_id
+            doc_title = request.title
+            doc_type = request.doc_type
+            source_uri = request.source_url
+            metadata = request.metadata or {}
+            extracted_text = request.content
+        
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Either provide 'file' (multipart/form-data) or JSON body with 'content' field",
+            )
+        
+        # Create document
         document_service = DocumentService(db)
         document = await document_service.create_document(
             workspace_id=workspace_id,
-            user_id=request.user_id,
-            title=request.title,
-            source_type=request.doc_type,
-            source_uri=request.source_url,
-            metadata=request.metadata,
+            user_id=resolved_user_id,
+            title=doc_title,
+            source_type=doc_type,
+            source_uri=source_uri,
+            metadata=metadata,
         )
         
-        # Store raw text if provided
-        if request.content:
-            document = await document_service.store_raw_text(document.id, request.content)
+        # Store text content if available
+        if extracted_text:
+            document = await document_service.store_raw_text(document.id, extracted_text)
         
         # Check preferences for auto-ingest
         from app.services.user_preference_service import UserPreferenceService
         pref_service = UserPreferenceService(db)
-        preferences = await pref_service.get_preferences(user_id=request.user_id)
+        preferences = await pref_service.get_preferences(user_id=resolved_user_id)
         
-        run_id = None
-        if preferences.auto_ingest_on_upload and request.content:
+        if preferences.auto_ingest_on_upload and extracted_text:
             # Trigger auto-ingest in background
             input_data = IngestionAgentInput(
                 document_id=document.id,
                 workspace_id=workspace_id,
-                user_id=request.user_id,
+                user_id=resolved_user_id,
                 raw_text=None,  # Already stored
             )
             agent_run_service = AgentRunService(db)
-            input_json = input_data.model_dump()
+            input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
             agent_run = await agent_run_service.create_run(
                 workspace_id=workspace_id,
-                user_id=request.user_id,
+                user_id=resolved_user_id,
                 agent_name="ingestion",
                 input_json=input_json,
                 status="queued",
             )
-            run_id = agent_run.id
-            document.last_run_id = run_id
+            document.last_run_id = agent_run.id
             await db.commit()
             
             add_agent_task(
@@ -550,6 +968,8 @@ async def create_workspace_document(
             )
         
         return DocumentRead.model_validate(document)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -726,7 +1146,7 @@ async def regenerate_document_summary(
         if async_mode:
             try:
                 agent_run_service = AgentRunService(db)
-                input_json = input_data.model_dump()
+                input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
                 agent_run = await agent_run_service.create_run(
                     workspace_id=document.workspace_id,
                     user_id=document.created_by,

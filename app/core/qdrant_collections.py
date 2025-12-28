@@ -41,10 +41,21 @@ async def ensure_collections_exist() -> None:
     Creates collections if they don't exist, no-op if they already exist.
     Also creates payload indexes for efficient filtering.
     """
+    import asyncio
+    
     client = get_qdrant_client()
     
-    # Check existing collections
-    existing_collections = {c.name for c in client.get_collections().collections}
+    # Check existing collections (run synchronous call in thread pool)
+    try:
+        # 10 second timeout for collection operations
+        collections_result = await asyncio.wait_for(
+            asyncio.to_thread(client.get_collections),
+            timeout=10.0
+        )
+        existing_collections = {c.name for c in collections_result.collections}
+    except asyncio.TimeoutError:
+        logger.error("❌ Timeout checking Qdrant collections (server may be unreachable)")
+        raise
     
     # Collection configuration (shared for both)
     collection_config = {
@@ -62,7 +73,8 @@ async def ensure_collections_exist() -> None:
     # Ensure chunks collection
     if CHUNKS_COLLECTION not in existing_collections:
         logger.info(f"📦 Creating collection: {CHUNKS_COLLECTION}")
-        client.create_collection(
+        await asyncio.to_thread(
+            client.create_collection,
             collection_name=CHUNKS_COLLECTION,
             **collection_config,
         )
@@ -73,7 +85,8 @@ async def ensure_collections_exist() -> None:
     # Ensure concepts collection
     if CONCEPTS_COLLECTION not in existing_collections:
         logger.info(f"📦 Creating collection: {CONCEPTS_COLLECTION}")
-        client.create_collection(
+        await asyncio.to_thread(
+            client.create_collection,
             collection_name=CONCEPTS_COLLECTION,
             **collection_config,
         )
@@ -81,8 +94,8 @@ async def ensure_collections_exist() -> None:
     else:
         logger.info(f"ℹ️  Collection already exists: {CONCEPTS_COLLECTION}")
     
-    # Create payload indexes for efficient filtering
-    create_payload_indexes(client)
+    # Create payload indexes for efficient filtering (run in thread pool)
+    await asyncio.to_thread(create_payload_indexes, client)
 
 
 def create_payload_indexes(client: QdrantClient) -> None:

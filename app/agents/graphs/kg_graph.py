@@ -285,7 +285,7 @@ async def _build_output(state: KGExtractionState) -> KGExtractionState:
             name=c.name,
             description=c.description,
             type=c.type,
-            confidence=c.metadata.get("confidence", 0.5) if c.metadata else 0.5,
+            confidence=c.meta_data.get("confidence", 0.5) if c.meta_data else 0.5,
         )
         for c in created_concepts
     ]

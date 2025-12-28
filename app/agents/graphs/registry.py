@@ -5,13 +5,12 @@ from typing import Any
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.graphs import (
-    build_flashcard_graph,
-    build_ingestion_graph,
-    build_kg_extraction_graph,
-    build_study_chat_graph,
-    build_summary_graph,
-)
+# Import directly from modules to avoid circular import with __init__.py
+from app.agents.graphs.flashcard_graph import build_flashcard_graph
+from app.agents.graphs.ingestion_graph import build_ingestion_graph
+from app.agents.graphs.kg_graph import build_kg_extraction_graph
+from app.agents.graphs.study_chat_graph import build_study_chat_graph
+from app.agents.graphs.summary_graph import build_summary_graph
 from app.agents.service_tools import ServiceTools
 from app.core.config import settings
 

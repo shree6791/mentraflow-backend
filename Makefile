@@ -1,9 +1,10 @@
-.PHONY: run format lint test migrate makemigration install help routes devflow
+.PHONY: run format lint test migrate makemigration install help routes devflow run-debug
 
 help:
 	@echo "Available targets:"
 	@echo "  install       - Install dependencies"
 	@echo "  run           - Run the FastAPI development server"
+	@echo "  run-debug     - Run the FastAPI server in debug mode (DEBUG=true)"
 	@echo "  format        - Format code with black"
 	@echo "  lint          - Lint code with ruff"
 	@echo "  test          - Run tests"
@@ -16,7 +17,13 @@ install:
 	pip install -r requirements.txt
 
 run:
-	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	uvicorn app.main:app --reload --host $${HOST:-0.0.0.0} --port $${PORT:-8000}
+
+run-debug:
+	@if [ -f .env ]; then \
+		export $$(grep -v '^#' .env | grep -E '^(HOST|PORT)=' | xargs); \
+	fi; \
+	DEBUG=true HOST=$${HOST:-127.0.0.1} PORT=$${PORT:-8000} uvicorn app.main:app --reload --host $${HOST:-127.0.0.1} --port $${PORT:-8000} --log-level debug
 
 format:
 	black app tests alembic

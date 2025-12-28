@@ -37,7 +37,7 @@ class Concept(Base):
     type: Mapped[str | None] = mapped_column(Text, nullable=True)
     aliases: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    meta_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, name="metadata")
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

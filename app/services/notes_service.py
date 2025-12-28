@@ -35,7 +35,7 @@ class NotesService:
                 note_type=note_type,
                 title=title,
                 body=content,
-                metadata=metadata,
+                meta_data=metadata,
             )
             self.db.add(note)
             await self.db.commit()

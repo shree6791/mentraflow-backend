@@ -45,7 +45,7 @@ class FlashcardReview(Base):
         default=func.now(),
         server_default=func.now(),
     )
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    meta_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, name="metadata")
 
     # Relationships
     flashcard: Mapped["Flashcard"] = relationship(

@@ -49,7 +49,7 @@ class FlashcardService:
                     source_chunk_ids=card_data.get("source_chunk_ids"),
                     batch_id=batch_id,
                     tags=card_data.get("tags"),
-                    metadata=card_data.get("metadata"),
+                    meta_data=card_data.get("metadata"),
                 )
                 self.db.add(flashcard)
                 flashcards.append(flashcard)

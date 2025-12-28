@@ -117,8 +117,8 @@ class FlashcardReviewRequest(BaseModel):
 async def review_flashcard(
     flashcard_id: Annotated[uuid.UUID, Path(description="Flashcard ID")],
     request: FlashcardReviewRequest,
-    force: Annotated[bool, Query(description="Bypass due check and cooldown")] = False,
     db: Annotated[AsyncSession, Depends(get_db)],
+    force: Annotated[bool, Query(description="Bypass due check and cooldown")] = False,
 ) -> FlashcardReviewResponse:
     """Record a flashcard review and update SRS state."""
     try:
