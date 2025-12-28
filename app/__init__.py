@@ -1,0 +1,2 @@
+"""MentraFlow backend application."""
+
