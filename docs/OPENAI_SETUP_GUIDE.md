@@ -49,15 +49,58 @@
 - Chat Completions API (for LLM agents)
 - Embeddings API (for document embeddings)
 
-### 5. **API Endpoints You'll Use**
+### 5. **API Endpoints That Use OpenAI**
 
-#### Chat Completions (for agents)
+Your MentraFlow backend uses OpenAI in the following routes:
+
+#### Routes Using OpenAI Chat Completions (`gpt-4o-mini`)
+
+1. **POST** `/api/v1/chat` - Study Chat Assistant
+   - Uses: `gpt-4o-mini` for answering questions with citations
+   - Input: User questions about documents
+   - Output: Answers with citations from retrieved chunks
+
+2. **POST** `/api/v1/documents/{document_id}/ingest` - Document Ingestion
+   - Uses: `gpt-4o-mini` for generating document summaries (optional)
+   - Uses: `text-embedding-3-small` for chunk embeddings
+   - Processes: Document chunking, embedding generation, and optional summary
+
+3. **POST** `/api/v1/documents/{document_id}/flashcards` - Flashcard Generation
+   - Uses: `gpt-4o-mini` for generating flashcards from document content
+   - Modes: `key_terms`, `qa`, or `cloze`
+   - Output: Flashcards with front/back content
+
+4. **POST** `/api/v1/documents/{document_id}/kg` - Knowledge Graph Extraction
+   - Uses: `gpt-4o-mini` for extracting concepts and relationships
+   - Output: Concepts and edges for knowledge graph
+
+5. **POST** `/api/v1/documents/{document_id}/summary` - Document Summary
+   - Uses: `gpt-4o-mini` for generating document summaries
+   - Output: Concise summary of document content
+
+#### Routes Using OpenAI Embeddings (`text-embedding-3-small`)
+
+1. **POST** `/api/v1/documents/{document_id}/ingest` - Document Ingestion
+   - Generates embeddings for all document chunks
+   - Stores embeddings in Qdrant vector database
+
+2. **POST** `/api/v1/search` - Semantic Search
+   - Uses embeddings to find relevant document chunks
+   - Searches across workspace documents
+
+3. **POST** `/api/v1/chat` - Study Chat Assistant
+   - Uses embeddings for semantic retrieval of relevant chunks
+   - Retrieves chunks before generating answer
+
+#### OpenAI API Calls Made Internally
+
+**Chat Completions API:**
 ```
 POST https://api.openai.com/v1/chat/completions
 Model: gpt-4o-mini
 ```
 
-#### Embeddings (for documents)
+**Embeddings API:**
 ```
 POST https://api.openai.com/v1/embeddings
 Model: text-embedding-3-small
@@ -67,12 +110,22 @@ Model: text-embedding-3-small
 
 **15-page PDF processing:**
 - Embeddings: ~10,000 tokens × $0.02/1M = **$0.0002 per document**
-- Chat queries: ~500 tokens × $0.15/1M = **$0.000075 per query**
+- Summary generation: ~1,000 tokens × $0.15/1M = **$0.00015 per document**
+- Flashcard generation: ~2,000 tokens × $0.15/1M = **$0.0003 per document**
+- KG extraction: ~1,500 tokens × $0.15/1M = **$0.000225 per document**
 
-**Monthly estimate (100 documents, 1000 queries):**
-- Embeddings: 100 × $0.0002 = **$0.02**
-- Chat: 1000 × $0.000075 = **$0.075**
-- **Total: ~$0.10/month** (very affordable!)
+**Chat queries:**
+- Embeddings (query): ~50 tokens × $0.02/1M = **$0.000001 per query**
+- Chat response: ~500 tokens × $0.15/1M = **$0.000075 per query**
+
+**Monthly estimate (100 documents, 1000 queries, 500 flashcard generations, 200 KG extractions):**
+- Document embeddings: 100 × $0.0002 = **$0.02**
+- Document summaries: 100 × $0.00015 = **$0.015**
+- Flashcard generation: 500 × $0.0003 = **$0.15**
+- KG extraction: 200 × $0.000225 = **$0.045**
+- Chat queries (embeddings): 1000 × $0.000001 = **$0.001**
+- Chat responses: 1000 × $0.000075 = **$0.075**
+- **Total: ~$0.31/month** (very affordable!)
 
 ### 7. **Security Best Practices**
 
@@ -86,6 +139,46 @@ Model: text-embedding-3-small
 
 After adding your API key to `.env`, test with:
 
+#### Test 1: Health Check
+```bash
+curl http://localhost:8000/health
+```
+Should return: `{"status": "healthy", "database": "connected", "qdrant": "connected"}`
+
+#### Test 2: Document Ingestion (uses embeddings)
+```bash
+curl -X POST "http://localhost:8000/api/v1/documents" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "your-workspace-id",
+    "user_id": "your-user-id",
+    "title": "Test Document",
+    "doc_type": "text",
+    "content": "Machine learning is a subset of artificial intelligence."
+  }'
+
+# Then ingest (this will use OpenAI embeddings)
+curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/ingest" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "your-workspace-id",
+    "user_id": "your-user-id"
+  }'
+```
+
+#### Test 3: Chat (uses embeddings + chat completions)
+```bash
+curl -X POST "http://localhost:8000/api/v1/chat" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "your-workspace-id",
+    "user_id": "your-user-id",
+    "message": "What is machine learning?",
+    "document_id": "{document_id}"
+  }'
+```
+
+#### Test 4: Direct OpenAI API Test (Python)
 ```python
 # Test embedding
 from openai import OpenAI
@@ -95,6 +188,13 @@ response = client.embeddings.create(
     input="test text"
 )
 print(f"Dimensions: {len(response.data[0].embedding)}")  # Should be 1536
+
+# Test chat
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+print(response.choices[0].message.content)
 ```
 
 ### 9. **Troubleshooting**
