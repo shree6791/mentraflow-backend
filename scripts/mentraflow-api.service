@@ -1,0 +1,24 @@
+[Unit]
+Description=MentraFlow API
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=mentraflow
+Group=mentraflow
+WorkingDirectory=/home/mentraflow/mentraflow-backend
+Environment="PATH=/home/mentraflow/mentraflow-backend/venv/bin"
+EnvironmentFile=/home/mentraflow/mentraflow-backend/.env
+ExecStart=/home/mentraflow/mentraflow-backend/venv/bin/gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 120 --access-logfile - --error-logfile - --log-level info
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

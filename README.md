@@ -35,7 +35,10 @@ All documentation is available in the [`docs/`](./docs/) directory:
 - **[Agents Documentation](./docs/AGENTS.md)** - Agent architecture and implementation details
 - **[Personalization & Optimization](./docs/PERSONALIZATION_AND_OPTIMIZATION.md)** - Personalization requirements, spaced repetition, and when to use QLoRA/LoRA/MMR
 - **[OpenAI Setup Guide](./docs/OPENAI_SETUP_GUIDE.md)** - OpenAI API key and model configuration
-- **[Markdown Audit Summary](./docs/MARKDOWN_AUDIT_SUMMARY.md)** - Documentation audit report and current state
+- **[Database Fields Explanation](./docs/DATABASE_FIELDS_EXPLANATION.md)** - Why we need `steps`, `metadata` fields in tables
+- **[Droplet Deployment Guide](./docs/DEPLOYMENT_DROPLET.md)** - **Complete guide for Droplet (VPS) deployment** ⭐
+- **[Frontend + Backend Deployment](./docs/FRONTEND_BACKEND_DEPLOYMENT.md)** - Deploy both UI and API on same Droplet (assumes separate repos)
+- **[Nginx Setup Guide](./docs/NGINX_SETUP.md)** - One-time Nginx configuration (2 minutes)
 - **[Alembic Migrations](./docs/alembic/README.md)** - Database migration guide
 
 ## Available Make Targets
