@@ -57,6 +57,12 @@ DEFAULT_TOP_K = 8
 TOP_K_MIN = 1
 TOP_K_MAX = 50
 
+# Score threshold for semantic search (0.0-1.0, cosine similarity)
+# Results below this threshold are filtered out to ensure quality
+DEFAULT_SCORE_THRESHOLD = 0.7  # Minimum similarity score (70% similarity)
+SCORE_THRESHOLD_MIN = 0.0
+SCORE_THRESHOLD_MAX = 1.0
+
 # ============================================================================
 # Chunking Constants
 # ============================================================================
@@ -64,4 +70,19 @@ TOP_K_MAX = 50
 # Default chunk size and overlap
 DEFAULT_CHUNK_SIZE = 800
 DEFAULT_CHUNK_OVERLAP = 120
+
+# ============================================================================
+# Knowledge Graph Constants
+# ============================================================================
+
+# Concept extraction limits (quality over quantity)
+MIN_CONCEPTS_PER_DOCUMENT = 5  # Minimum target if content is available
+MAX_CONCEPTS_PER_DOCUMENT = 20  # Maximum cap to prioritize quality
+
+# Minimum confidence threshold for concepts (0.0-1.0)
+MIN_CONCEPT_CONFIDENCE = 0.7
+
+# Edge extraction limits (quality over quantity)
+MIN_EDGES_PER_DOCUMENT = 3  # Minimum target if relationships are available
+MAX_EDGES_PER_DOCUMENT = 30  # Maximum cap to prioritize quality
 

@@ -205,10 +205,25 @@ Extract concepts and relationships. Be conservative with confidence scores."""
 
 
 async def _prepare_concepts(state: KGExtractionState) -> KGExtractionState:
-    """Prepare concepts data for upsert."""
+    """Prepare concepts data for upsert, filtering by quality and quantity limits."""
+    from app.core.constants import MAX_CONCEPTS_PER_DOCUMENT, MIN_CONCEPT_CONFIDENCE
+    
     response = state["llm_response"]
     concepts_data = []
-    for concept in response.concepts:
+    
+    # Filter concepts by confidence threshold and sort by confidence (highest first)
+    filtered_concepts = [
+        concept for concept in response.concepts
+        if concept.confidence >= MIN_CONCEPT_CONFIDENCE
+    ]
+    
+    # Sort by confidence (descending) to prioritize highest quality
+    filtered_concepts.sort(key=lambda c: c.confidence, reverse=True)
+    
+    # Apply quantity limit (keep top N concepts)
+    limited_concepts = filtered_concepts[:MAX_CONCEPTS_PER_DOCUMENT]
+    
+    for concept in limited_concepts:
         concepts_data.append(
             {
                 "name": concept.name,
@@ -219,6 +234,7 @@ async def _prepare_concepts(state: KGExtractionState) -> KGExtractionState:
                 "metadata": {"confidence": concept.confidence},
             }
         )
+    
     return {**state, "concepts_data": concepts_data}
 
 
@@ -251,7 +267,9 @@ async def _build_name_mapping(state: KGExtractionState) -> KGExtractionState:
 
 
 async def _prepare_edges(state: KGExtractionState) -> KGExtractionState:
-    """Prepare edges data for upsert."""
+    """Prepare edges data for upsert, filtering by quality and quantity limits."""
+    from app.core.constants import MAX_EDGES_PER_DOCUMENT, MIN_CONCEPT_CONFIDENCE
+    
     response = state["llm_response"]
     name_to_id = state["name_to_id"]
 
@@ -260,7 +278,8 @@ async def _prepare_edges(state: KGExtractionState) -> KGExtractionState:
         src_id = name_to_id.get(edge.src_name)
         dst_id = name_to_id.get(edge.dst_name)
 
-        if src_id and dst_id:
+        # Only include edges where both concepts exist and confidence is high enough
+        if src_id and dst_id and edge.confidence >= MIN_CONCEPT_CONFIDENCE:
             edges_data.append(
                 {
                     "src_type": "concept",
@@ -272,6 +291,10 @@ async def _prepare_edges(state: KGExtractionState) -> KGExtractionState:
                     "evidence": {"confidence": edge.confidence},
                 }
             )
+    
+    # Sort by confidence (descending) and limit quantity
+    edges_data.sort(key=lambda e: e["evidence"]["confidence"], reverse=True)
+    edges_data = edges_data[:MAX_EDGES_PER_DOCUMENT]
 
     return {**state, "edges_data": edges_data}
 
@@ -349,13 +372,13 @@ async def _find_related_concepts(state: KGExtractionState) -> KGExtractionState:
                     workspace_id=input_data.workspace_id,
                     query_vector=vector,
                     top_k=MAX_RELATIONS_PER_CONCEPT + len(created_concepts),  # Get extra to account for filtering
+                    score_threshold=SIMILARITY_THRESHOLD,  # Filter at Qdrant level for efficiency
                 )
                 
-                # Filter out newly created concepts and apply similarity threshold
+                # Filter out newly created concepts (score threshold already applied by Qdrant)
                 similar_concepts = [
                     r for r in search_results
-                    if r.get("score", 0) >= SIMILARITY_THRESHOLD
-                    and r.get("id") not in new_concept_ids
+                    if r.get("id") not in new_concept_ids
                 ][:MAX_RELATIONS_PER_CONCEPT]
                 
                 # Create edges to similar existing concepts

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.constants import DEFAULT_SCORE_THRESHOLD
 from app.infrastructure.qdrant import QdrantClientWrapper
 from app.models.document_chunk import DocumentChunk
 from app.services.base import BaseService
@@ -78,8 +79,24 @@ class RetrievalService(BaseService):
         query: str,
         top_k: int = 8,
         filters: dict[str, Any] | None = None,
+        score_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
-        """Perform semantic search and return chunk texts with citations."""
+        """Perform semantic search and return chunk texts with citations.
+        
+        Args:
+            workspace_id: Workspace UUID
+            query: Query text to search for
+            top_k: Number of results to return (default: 8)
+            filters: Optional filters (e.g., {"document_id": "uuid"})
+            score_threshold: Minimum similarity score (0.0-1.0). If None, uses DEFAULT_SCORE_THRESHOLD.
+            
+        Returns:
+            List of search results with chunk details and citations (all above score_threshold)
+        """
+        # Use default score threshold if not specified
+        if score_threshold is None:
+            score_threshold = DEFAULT_SCORE_THRESHOLD
+        
         # Generate query embedding
         query_vector = await self._generate_query_embedding(query)
 
@@ -96,6 +113,7 @@ class RetrievalService(BaseService):
             query_vector=query_vector,
             top_k=top_k,
             document_id=document_id,
+            score_threshold=score_threshold,
         )
 
         # Fetch chunk details from DB (batch query to avoid N+1 problem)

@@ -176,6 +176,7 @@ class QdrantClientWrapper:
         vector: list[float],
         top_k: int,
         filters: dict[str, Any] | None = None,
+        score_threshold: float | None = None,
         collection_type: str = "chunks",
     ) -> list[dict[str, Any]]:
         """Search for similar vectors in a collection.
@@ -185,10 +186,11 @@ class QdrantClientWrapper:
             vector: Query vector (1536 dimensions)
             top_k: Number of results to return
             filters: Optional filters (e.g., {"document_id": "uuid"} for chunks, {"concept_id": "uuid"} for concepts)
+            score_threshold: Minimum similarity score (0.0-1.0 for cosine similarity). Results below this are filtered out.
             collection_type: Type of collection - "chunks" or "concepts" (default: "chunks")
             
         Returns:
-            List of search results with score, id, and payload
+            List of search results with score, id, and payload (all above score_threshold)
         """
         collection_name = self.get_collection_name(collection_type)
 
@@ -223,16 +225,25 @@ class QdrantClientWrapper:
             # Qdrant Python client uses 'query_points' method (or 'search' in older versions)
             # Try 'query_points' first (newer API), fallback to 'search' if it doesn't exist
             if hasattr(self.client, 'query_points'):
+                # Build query parameters
+                query_params = {
+                    "collection_name": collection_name,
+                    "query": vector,
+                    "limit": top_k,
+                }
+                if qdrant_filter:
+                    query_params["query_filter"] = qdrant_filter
+                if score_threshold is not None:
+                    query_params["score_threshold"] = score_threshold
+                
                 search_results = await asyncio.to_thread(
                     self.client.query_points,
-                    collection_name=collection_name,
-                    query=vector,
-                    limit=top_k,
-                    query_filter=qdrant_filter,
+                    **query_params,
                 )
                 # query_points returns a QueryResponse object, extract points
                 search_results = search_results.points if hasattr(search_results, 'points') else []
             elif hasattr(self.client, 'search'):
+                # Older API - score_threshold may not be supported, filter manually
                 search_results = await asyncio.to_thread(
                     self.client.search,
                     collection_name=collection_name,
@@ -246,27 +257,36 @@ class QdrantClientWrapper:
             logger.error(f"❌ Failed to search {collection_name}: {str(e)}", exc_info=True)
             raise
 
-        # Convert to list of dictionaries
+        # Convert to list of dictionaries and apply score threshold if needed
         # Handle both query_points (returns QueryResponse with points) and search (returns list of ScoredPoint)
         results = []
         for result in search_results:
             # query_points returns ScoredPoint objects, search also returns ScoredPoint objects
             # Both have id, score, and payload attributes
             if hasattr(result, 'id') and hasattr(result, 'score') and hasattr(result, 'payload'):
+                score = result.score
+                # Apply score threshold if specified (for older API that doesn't support it natively)
+                if score_threshold is not None and score < score_threshold:
+                    continue  # Skip results below threshold
+                
                 results.append(
                     {
                         "id": result.id,
-                        "score": result.score,
+                        "score": score,
                         "payload": result.payload,
                     }
                 )
             else:
                 # Fallback: if structure is different, try to extract what we can
                 logger.warning(f"Unexpected search result structure: {type(result)}")
+                score = getattr(result, 'score', 0.0)
+                if score_threshold is not None and score < score_threshold:
+                    continue  # Skip results below threshold
+                
                 results.append(
                     {
                         "id": getattr(result, 'id', None),
-                        "score": getattr(result, 'score', 0.0),
+                        "score": score,
                         "payload": getattr(result, 'payload', {}),
                     }
                 )
@@ -302,6 +322,7 @@ class QdrantClientWrapper:
         query_vector: list[float],
         top_k: int = 8,
         document_id: uuid.UUID | None = None,
+        score_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         """Search for similar chunks in the chunks collection.
         
@@ -310,9 +331,10 @@ class QdrantClientWrapper:
             query_vector: Query vector (1536 dimensions)
             top_k: Number of results to return (default: 8)
             document_id: Optional document ID filter
+            score_threshold: Minimum similarity score (0.0-1.0). Results below this are filtered out.
             
         Returns:
-            List of search results with score, id, and payload
+            List of search results with score, id, and payload (all above score_threshold)
         """
         filters = {}
         if document_id:
@@ -323,6 +345,7 @@ class QdrantClientWrapper:
             vector=query_vector,
             top_k=top_k,
             filters=filters if filters else None,
+            score_threshold=score_threshold,
             collection_type="chunks",
         )
 
@@ -355,6 +378,7 @@ class QdrantClientWrapper:
         query_vector: list[float],
         top_k: int = 10,
         name_prefix: str | None = None,
+        score_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         """Search for similar concepts in the concepts collection.
         
@@ -363,9 +387,10 @@ class QdrantClientWrapper:
             query_vector: Query vector (1536 dimensions)
             top_k: Number of results to return (default: 10)
             name_prefix: Optional concept name prefix filter (exact match on concept_name keyword)
+            score_threshold: Minimum similarity score (0.0-1.0). Results below this are filtered out.
             
         Returns:
-            List of search results with score, id, and payload
+            List of search results with score, id, and payload (all above score_threshold)
         """
         filters = {}
         if name_prefix:
@@ -380,6 +405,7 @@ class QdrantClientWrapper:
             vector=query_vector,
             top_k=top_k,
             filters=filters if filters else None,
+            score_threshold=score_threshold,
             collection_type="concepts",
         )
 

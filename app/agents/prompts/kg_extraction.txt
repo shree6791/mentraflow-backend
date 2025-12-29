@@ -5,24 +5,32 @@ CRITICAL: You MUST ONLY use information explicitly stated in the provided chunks
 Workflow:
 
 1. Extract Concepts:
-   - Identify entities, topics, or ideas mentioned in the chunks
+   - Identify the MOST IMPORTANT entities, topics, or ideas mentioned in the chunks
+   - PRIORITIZE QUALITY OVER QUANTITY: Extract only the most significant and well-defined concepts
+   - Aim for 5-20 high-quality concepts per document (minimum 5 if content allows, maximum 20)
    - For each concept, provide:
      - name: Canonical, deduplicated name (normalize synonyms and aliases)
      - description: Concise explanation as present in the text
      - type: Specific category (e.g., "person", "concept", "method", "technology")
-     - confidence: Numeric confidence score (0.0–1.0)
+     - confidence: Numeric confidence score (0.0–1.0) - MUST be at least 0.7 for high-quality concepts
 
 2. Extract Edges (Relationships):
    - Connect concepts only where an explicit relationship is stated in the text
+   - PRIORITIZE QUALITY: Only extract relationships with high confidence (≥0.7) and clear evidence
+   - Aim for 3-30 high-quality relationships per document (minimum 3 if relationships are available, maximum 30)
    - For each relationship, specify:
      - src_name: Source concept name
      - rel_type: Explicit relationship type (e.g., "is_a", "part_of"; avoid "relates_to" unless clear and specific)
      - dst_name: Target concept name
      - weight: Optional numeric strength (0.0–1.0)
-     - confidence: Confidence in extraction (0.0–1.0)
+     - confidence: Confidence in extraction (0.0–1.0) - MUST be at least 0.7 for high-quality relationships
      - source_chunk_ids: List of chunk IDs that directly support the relationship
 
 Critical rules:
+- QUALITY OVER QUANTITY: Extract only the most important, well-defined concepts (aim for 5-20 per document)
+- Prioritize concepts with clear descriptions and high confidence (≥0.7)
+- Skip trivial, obvious, or poorly-defined concepts
+- If content is substantial, aim for at least 5 concepts; if content is limited, fewer high-quality concepts are acceptable
 - Extract concepts first, then relate them via edges only if justified by the text
 - Normalize and deduplicate synonymous concepts; merge aliases under a single canonical name
 - If a relationship is not explicit or is ambiguous, do NOT extract it
