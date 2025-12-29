@@ -40,11 +40,9 @@ apt install -y python3.12 python3.12-venv python3-pip git curl
 # Install PostgreSQL client
 apt install -y postgresql-client
 
-# Install Nginx (reverse proxy)
-apt install -y nginx
-
-# Install Certbot (for SSL/HTTPS - optional for now)
-apt install -y certbot python3-certbot-nginx
+# Note: Nginx is installed and configured by your frontend setup
+# The backend doesn't need nginx - it runs on port 8000
+# Frontend nginx will proxy /api/* requests to http://localhost:8000
 
 # Create application user with sudo access
 adduser --disabled-password --gecos "" mentraflow
@@ -187,77 +185,34 @@ curl http://127.0.0.1:8000/health
 
 ---
 
-### **Step 6: Configure Nginx (One-Time Setup)**
+### **Step 6: Nginx Configuration**
 
-**On the Droplet** (as root or with sudo):
+**Note:** Nginx is handled by your frontend setup. The backend doesn't need nginx configuration.
 
-**Option A: Backend Only (API only)**
-
-```bash
-# Copy Nginx config
-sudo cp /home/mentraflow/mentraflow-backend/scripts/nginx.conf /etc/nginx/sites-available/mentraflow-api
-
-# Enable the site
-sudo ln -s /etc/nginx/sites-available/mentraflow-api /etc/nginx/sites-enabled/
-
-# Remove default site
-sudo rm /etc/nginx/sites-enabled/default
-
-# Test configuration
-sudo nginx -t
-
-# Restart Nginx
-sudo systemctl restart nginx
-
-# Check status
-sudo systemctl status nginx
-```
-
-**Option B: Frontend + Backend (if deploying UI too)**
-
-```bash
-# Copy complete Nginx config
-sudo cp /home/mentraflow/mentraflow-backend/scripts/nginx.conf.complete /etc/nginx/sites-available/mentraflow
-
-# Enable the site
-sudo ln -s /etc/nginx/sites-available/mentraflow /etc/nginx/sites-enabled/
-
-# Remove default site
-sudo rm /etc/nginx/sites-enabled/default
-
-# Test configuration
-sudo nginx -t
-
-# Restart Nginx
-sudo systemctl restart nginx
-```
+- Backend runs on port 8000 (handled by systemd service)
+- Frontend nginx proxies `/api/*` requests to `http://localhost:8000`
+- See your frontend repository for nginx configuration
 
 ---
 
-### **Step 7: Verify Deployment**
+### **Step 6: Verify Deployment**
 
 **From your local machine (test from outside the server):**
 
 ```bash
-# Test health endpoint
-curl http://YOUR_DROPLET_IP/health
+# Test backend directly (port 8000)
+curl http://YOUR_DROPLET_IP:8000/health
 
-# Test API endpoint
+# Test via frontend nginx (if frontend is deployed)
 curl http://YOUR_DROPLET_IP/api/v1/health
 
 # Test Swagger docs (open in browser)
-open http://YOUR_DROPLET_IP/docs
+open http://YOUR_DROPLET_IP:8000/docs
 # or
-curl http://YOUR_DROPLET_IP/docs
+curl http://YOUR_DROPLET_IP:8000/docs
 ```
 
 **Expected response:**
-```json
-{"status":"healthy","database":"connected","qdrant":"connected"}
-```
-
-**Expected response:**
-
 ```json
 {"status":"healthy","database":"connected","qdrant":"connected"}
 ```
@@ -358,20 +313,9 @@ sudo journalctl -u mentraflow-api -n 100 --no-pager
 
 ### **Nginx Management**
 
-```bash
-# Check Nginx status
-sudo systemctl status nginx
+**Note:** Nginx is managed by your frontend setup. See your frontend repository for nginx commands.
 
-# Restart Nginx
-sudo systemctl restart nginx
-
-# Test Nginx config
-sudo nginx -t
-
-# View Nginx logs
-sudo tail -f /var/log/nginx/mentraflow-api-access.log
-sudo tail -f /var/log/nginx/mentraflow-api-error.log
-```
+The backend doesn't need nginx - it runs directly on port 8000.
 
 ### **Deployment**
 
@@ -438,15 +382,16 @@ curl http://127.0.0.1:8000/health
 1. **Firewall**: Configure UFW to only allow necessary ports
    ```bash
    sudo ufw allow 22/tcp    # SSH
-   sudo ufw allow 80/tcp    # HTTP
-   sudo ufw allow 443/tcp   # HTTPS
+   sudo ufw allow 80/tcp    # HTTP (for frontend nginx)
+   sudo ufw allow 443/tcp   # HTTPS (for frontend nginx)
+   # Note: Port 8000 doesn't need to be open - frontend nginx proxies to it
    sudo ufw enable
    ```
 
 2. **SSH Keys**: Use SSH keys instead of passwords
 3. **Non-Root User**: Application runs as `mentraflow` user, not root
 4. **Environment Variables**: Never commit `.env` file to git
-5. **SSL/HTTPS**: Set up SSL certificate when you have a domain
+5. **SSL/HTTPS**: Set up SSL certificate when you have a domain (in frontend nginx)
 
 ---
 
@@ -454,13 +399,9 @@ curl http://127.0.0.1:8000/health
 
 Once you have a domain name pointing to your Droplet:
 
-```bash
-# Get SSL certificate
-sudo certbot --nginx -d your-domain.com
+**Note:** SSL/HTTPS is configured in your frontend nginx setup. The backend doesn't need SSL configuration - it runs on localhost:8000 and is proxied by frontend nginx.
 
-# Certbot will automatically configure Nginx for HTTPS
-# Your API will be accessible at https://your-domain.com
-```
+See your frontend repository for SSL setup instructions.
 
 ---
 
@@ -494,8 +435,8 @@ sudo systemctl status mentraflow-api nginx
 - [ ] Dependencies installed
 - [ ] Database migrations run
 - [ ] Systemd service configured and running
-- [ ] Nginx configured and running
-- [ ] API accessible at `http://YOUR_DROPLET_IP/api/v1/...`
+- [ ] Backend accessible at `http://YOUR_DROPLET_IP:8000/health`
+- [ ] Frontend nginx configured (in frontend repo) to proxy `/api/*` to `http://localhost:8000`
 - [ ] Health check returns `{"status":"healthy"}`
 
 ---
@@ -505,10 +446,11 @@ sudo systemctl status mentraflow-api nginx
 If you encounter issues:
 
 1. Check service logs: `sudo journalctl -u mentraflow-api -n 100`
-2. Check Nginx logs: `sudo tail -f /var/log/nginx/mentraflow-api-error.log`
+2. Check if backend is running: `curl http://127.0.0.1:8000/health`
 3. Verify all files are uploaded correctly
 4. Check `.env` file has correct values
 5. Verify database and Qdrant are accessible
+6. For nginx issues, check your frontend nginx configuration
 
 ---
 

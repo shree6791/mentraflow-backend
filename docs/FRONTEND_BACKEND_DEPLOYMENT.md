@@ -65,17 +65,19 @@ scp -r build/* mentraflow@YOUR_DROPLET_IP:/var/www/mentraflow-frontend/
 
 **Or use the deployment script** (see below for `deploy_frontend_to_droplet.sh`):
 
-### **Step 3: Update Nginx Configuration**
+### **Step 3: Configure Nginx**
 
 Nginx will serve:
 - **Frontend** (static files) from `/var/www/mentraflow-frontend/`
 - **Backend** (API) by proxying to `http://127.0.0.1:8000`
 
+**Note:** This nginx configuration is in your frontend repository, not the backend.
+
 ---
 
-## 🔧 Updated Nginx Configuration
+## 🔧 Nginx Configuration
 
-Here's the complete Nginx config for both frontend and backend:
+Here's the complete Nginx config for both frontend and backend (configure this in your frontend repo):
 
 ```nginx
 server {
@@ -148,9 +150,8 @@ sudo chown -R $USER:$USER /var/www/mentraflow-frontend
 # (From your local machine, after building)
 scp -r dist/* mentraflow@YOUR_DROPLET_IP:/var/www/mentraflow-frontend/
 
-# 3. Update Nginx config
-sudo nano /etc/nginx/sites-available/mentraflow-api
-# Copy the config above
+# 3. Update Nginx config (in your frontend repo)
+# Copy the config above to your frontend nginx configuration
 
 # 4. Test and restart
 sudo nginx -t
@@ -258,12 +259,9 @@ ssh mentraflow@YOUR_DROPLET_IP
 sudo mkdir -p /var/www/mentraflow-frontend
 sudo chown -R mentraflow:mentraflow /var/www/mentraflow-frontend
 
-# 3. Update Nginx config (use nginx.conf.complete)
-sudo cp /home/mentraflow/mentraflow-backend/scripts/nginx.conf.complete /etc/nginx/sites-available/mentraflow
-sudo ln -s /etc/nginx/sites-available/mentraflow /etc/nginx/sites-enabled/
-sudo rm /etc/nginx/sites-enabled/default
-sudo nginx -t
-sudo systemctl restart nginx
+# 3. Configure Nginx (in your frontend repo)
+# Use the nginx configuration from your frontend repository
+# It should proxy /api/* to http://127.0.0.1:8000
 ```
 
 ### **Deploying Updates**
@@ -321,9 +319,11 @@ scp -r dist/* mentraflow@YOUR_DROPLET_IP:/var/www/mentraflow-frontend/
 
 ---
 
-## 📝 Updated Nginx Config File
+## 📝 Nginx Configuration Location
 
-I'll create an updated `nginx.conf` that handles both frontend and backend.
+**Important:** The nginx configuration is in your **frontend repository**, not the backend.
+
+The backend doesn't need nginx - it runs on port 8000 and your frontend nginx proxies `/api/*` requests to it.
 
 ---
 

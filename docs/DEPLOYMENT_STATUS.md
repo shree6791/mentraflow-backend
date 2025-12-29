@@ -12,8 +12,8 @@
 - [x] Setup script (`setup_droplet.sh`) - Initial server configuration
 - [x] Update script (`update_on_droplet.sh`) - Quick updates after initial setup
 - [x] Systemd service file (`mentraflow-api.service`) - Auto-start and restart
-- [x] Nginx configuration (backend-only and frontend+backend options)
 - [x] Complete deployment documentation
+- [x] Note: Nginx is handled by frontend setup (not in backend repo)
 
 ### **Application Setup**
 - [x] Health check endpoint (`/health`) - Verifies API, database, Qdrant
@@ -27,7 +27,7 @@
 - [x] Non-root user execution (`mentraflow` user)
 - [x] SSH key authentication
 - [x] Environment variables not in code
-- [x] Nginx reverse proxy (hides app port)
+- [x] Backend runs on localhost:8000 (frontend nginx proxies to it)
 
 ---
 
@@ -135,7 +135,7 @@ sudo systemctl restart systemd-journald
 - [x] Database connected
 - [x] Qdrant connected
 - [x] Service auto-restarts on failure
-- [x] Nginx configured
+- [x] Backend accessible on port 8000
 - [x] Code deployment process
 - [x] Update process documented
 

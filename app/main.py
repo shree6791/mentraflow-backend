@@ -170,3 +170,10 @@ async def health_check():
         "qdrant": "connected"
     }
 
+
+@app.get("/api/v1/health")
+async def health_check_v1():
+    """Health check endpoint (v1) with database and Qdrant connection checks."""
+    # Reuse the same health check logic
+    return await health_check()
+

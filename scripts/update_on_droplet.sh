@@ -37,6 +37,6 @@ echo ""
 echo "✅ Update complete!"
 echo ""
 echo "🌐 Test from your local machine:"
-echo "   curl http://YOUR_DROPLET_IP/health"
-echo "   curl http://YOUR_DROPLET_IP/api/v1/health"
+echo "   curl http://YOUR_DROPLET_IP:8000/health"
+echo "   (Or via frontend nginx: curl http://YOUR_DROPLET_IP/api/v1/health)"
 

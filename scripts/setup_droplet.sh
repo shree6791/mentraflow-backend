@@ -18,13 +18,9 @@ sudo apt install -y python3.12 python3.12-venv python3-pip git curl
 echo "🗄️  Installing PostgreSQL client..."
 sudo apt install -y postgresql-client
 
-# Install Nginx (reverse proxy - one-time setup)
-echo "🌐 Installing Nginx..."
-sudo apt install -y nginx
-
-# Install Certbot for SSL (optional, for later)
-echo "🔒 Installing Certbot (for SSL/HTTPS)..."
-sudo apt install -y certbot python3-certbot-nginx
+# Note: Nginx is installed and configured by your frontend setup
+# The backend doesn't need nginx - it runs on port 8000
+# Frontend nginx will proxy /api/* requests to http://localhost:8000
 
 # Create application user (if it doesn't exist)
 if ! id "mentraflow" &>/dev/null; then
@@ -55,7 +51,8 @@ echo "📋 Next steps:"
 echo "   1. Set up SSH keys for mentraflow user (from your local machine)"
 echo "   2. Deploy code using: ./scripts/deploy_to_droplet.sh (from local machine)"
 echo "   3. SSH as mentraflow user and run: bash scripts/install_app_on_droplet.sh"
-echo "   4. Set up systemd service and Nginx (see install script output)"
+echo "   4. Set up systemd service (see install script output)"
+echo "   5. Configure nginx in your frontend repo (frontend nginx handles everything)"
 echo ""
 echo "📚 See docs/DEPLOYMENT_DROPLET.md for complete deployment guide"
 
