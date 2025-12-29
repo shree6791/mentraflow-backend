@@ -11,6 +11,7 @@ from app.infrastructure.database import (
     check_db_connection,
     create_tables,
     drop_tables,
+    normalize_database_url,
 )
 from app.infrastructure.qdrant import QdrantClientWrapper, qdrant_client, check_qdrant_connection
 
@@ -23,6 +24,7 @@ __all__ = [
     "check_db_connection",
     "create_tables",
     "drop_tables",
+    "normalize_database_url",
     # Vector Database (Qdrant)
     "QdrantClientWrapper",
     "qdrant_client",

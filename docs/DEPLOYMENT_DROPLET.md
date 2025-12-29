@@ -1,86 +1,145 @@
 # DigitalOcean Droplet Deployment Guide
 
-This guide covers deploying MentraFlow backend to a DigitalOcean Droplet (VPS).
+Complete guide for deploying MentraFlow backend to a DigitalOcean Droplet (VPS).
 
 ---
 
-## 🖥️ Your Droplet Setup
+## 🖥️ Prerequisites
 
-Based on your Droplet configuration:
-- **Name**: mentraflow-api
-- **Public IP**: 147.182.239.22
-- **Private IP**: 10.124.0.3
-- **Region**: SFO3 (San Francisco)
-- **Specs**: 2 GB Memory / 50 GB Disk
-- **OS**: Ubuntu 24.04 (LTS) x64
+- DigitalOcean Droplet created (Ubuntu 24.04 recommended)
+- SSH access to your Droplet
+- `.env` file configured with production values
+- GitHub repository (or code ready to deploy)
 
 ---
 
-## ✅ What You Have
+## 📋 Complete Deployment Process
 
-- ✅ Droplet created and running
-- ✅ `.env` file configured
-- ✅ Public IP address: `147.182.239.22`
+### **Step 1: Initial Server Setup (One-Time)**
 
----
-
-## 📋 Deployment Steps for Droplet
-
-### **Step 1: SSH into Your Droplet**
+SSH into your Droplet and run the setup script:
 
 ```bash
-# SSH into your Droplet
-ssh root@147.182.239.22
-# Or if you've set up a user:
-ssh root@147.182.239.22
+# SSH into Droplet (use DigitalOcean console or SSH)
+ssh root@YOUR_DROPLET_IP
+
+# Run the setup script
+cd /root  # or wherever you can access the script
+# Upload setup_droplet.sh first, or run commands manually
 ```
 
-### **Step 2: Initial Server Setup**
+**Or run setup commands manually:**
 
 ```bash
 # Update system
 apt update && apt upgrade -y
 
 # Install Python 3.12 and dependencies
-apt install -y python3.12 python3.12-venv python3-pip git
+apt install -y python3.12 python3.12-venv python3-pip git curl
 
-# Install PostgreSQL client (if using managed DB, you might not need this)
+# Install PostgreSQL client
 apt install -y postgresql-client
 
 # Install Nginx (reverse proxy)
 apt install -y nginx
 
-# Install Certbot (for SSL certificates)
+# Install Certbot (for SSL/HTTPS - optional for now)
 apt install -y certbot python3-certbot-nginx
-```
 
-### **Step 3: Create Application User**
-
-```bash
-# Create a non-root user for the application
+# Create application user with sudo access
 adduser --disabled-password --gecos "" mentraflow
 usermod -aG sudo mentraflow
 
-# Switch to application user
-su - mentraflow
+# Create application directory
+mkdir -p /home/mentraflow/mentraflow-backend
+chown mentraflow:mentraflow /home/mentraflow/mentraflow-backend
 ```
 
-### **Step 4: Clone Your Repository**
+---
+
+### **Step 2: Set Up SSH Access (One-Time)**
+
+From your **local machine**, set up SSH keys:
 
 ```bash
-# Clone your repository
-cd /home/mentraflow
-git clone https://github.com/your-username/mentraflow-backend.git
-cd mentraflow-backend
+# Generate SSH key (if you don't have one)
+ssh-keygen -t ed25519 -C "your-email@example.com"
 
-# Or if you prefer, upload files via SCP:
-# From your local machine:
-# scp -r . mentraflow@147.182.239.22:/home/mentraflow/mentraflow-backend
+# Get your public key
+cat ~/.ssh/id_ed25519.pub
 ```
 
-### **Step 5: Set Up Python Environment**
+**On the Droplet** (via DigitalOcean console), add your public key:
 
 ```bash
+# As mentraflow user
+mkdir -p ~/.ssh
+nano ~/.ssh/authorized_keys
+# Paste your public key, save (Ctrl+X, Y, Enter)
+chmod 600 ~/.ssh/authorized_keys
+chmod 700 ~/.ssh
+```
+
+**Test SSH from local machine:**
+
+```bash
+ssh mentraflow@YOUR_DROPLET_IP
+```
+
+---
+
+### **Step 3: Deploy Code to Droplet**
+
+From your **local machine** (in the `mentraflow-backend` directory):
+
+```bash
+# Make sure you have .env file
+ls -la .env
+
+# Run deployment script
+./scripts/deploy_to_droplet.sh
+```
+
+This will:
+- Upload all code (except venv, .git, etc.)
+- Upload your `.env` file separately
+
+**Or manually upload:**
+
+```bash
+# Upload code
+rsync -avz --exclude 'venv' \
+    --exclude '.venv' \
+    --exclude '__pycache__' \
+    --exclude '*.pyc' \
+    --exclude '.git' \
+    --exclude 'qdrant_storage' \
+    --exclude '.env' \
+    ./ mentraflow@YOUR_DROPLET_IP:/home/mentraflow/mentraflow-backend/
+
+# Upload .env separately
+scp .env mentraflow@YOUR_DROPLET_IP:/home/mentraflow/mentraflow-backend/.env
+```
+
+---
+
+### **Step 4: Install Application on Droplet**
+
+SSH into your Droplet as `mentraflow` user:
+
+```bash
+ssh mentraflow@YOUR_DROPLET_IP
+cd /home/mentraflow/mentraflow-backend
+
+# Run installation script
+bash scripts/install_app_on_droplet.sh
+```
+
+**Or install manually:**
+
+```bash
+cd /home/mentraflow/mentraflow-backend
+
 # Create virtual environment
 python3.12 -m venv venv
 source venv/bin/activate
@@ -88,109 +147,60 @@ source venv/bin/activate
 # Install dependencies
 pip install --upgrade pip
 pip install -r requirements.txt
-```
 
-### **Step 6: Configure Environment Variables**
-
-```bash
-# Copy your .env file to the server
-# From your local machine:
-scp .env mentraflow@147.182.239.22:/home/mentraflow/mentraflow-backend/.env
-
-# Or create it manually on the server:
-nano .env
-# Paste your environment variables
-```
-
-**Important**: Make sure your `.env` has:
-- `HOST=0.0.0.0` (not 127.0.0.1)
-- `PORT=8000` (or your preferred port)
-- `DEBUG=false`
-- All your database, Qdrant, and OpenAI credentials
-
-### **Step 7: Run Database Migrations**
-
-```bash
-# Activate virtual environment
-source venv/bin/activate
-
-# Run migrations
+# Run database migrations
 alembic upgrade head
 ```
 
-### **Step 8: Test the Application**
+---
+
+### **Step 5: Set Up Systemd Service**
+
+**On the Droplet** (as root or with sudo):
 
 ```bash
-# Test run (make sure it works)
-source venv/bin/activate
-gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+# Copy service file
+sudo cp /home/mentraflow/mentraflow-backend/scripts/mentraflow-api.service /etc/systemd/system/
 
-# In another terminal, test:
-curl http://147.182.239.22:8000/health
-```
-
-### **Step 9: Set Up Systemd Service**
-
-Create a systemd service to run the app automatically:
-
-```bash
-sudo nano /etc/systemd/system/mentraflow-api.service
-```
-
-Add this content:
-
-```ini
-[Unit]
-Description=MentraFlow API
-After=network.target
-
-[Service]
-Type=simple
-User=mentraflow
-WorkingDirectory=/home/mentraflow/mentraflow-backend
-Environment="PATH=/home/mentraflow/mentraflow-backend/venv/bin"
-ExecStart=/home/mentraflow/mentraflow-backend/venv/bin/gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 120 --access-logfile - --error-logfile - --log-level info
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start the service:
-
-```bash
+# Reload systemd
 sudo systemctl daemon-reload
+
+# Enable service (starts on boot)
 sudo systemctl enable mentraflow-api
+
+# Start service
 sudo systemctl start mentraflow-api
+
+# Check status
 sudo systemctl status mentraflow-api
 ```
 
-### **Step 10: Configure Nginx (Reverse Proxy) - One-Time Setup**
+**Verify it's running:**
 
-**Choose your setup:**
-
-#### **Option A: Backend Only** (API only)
 ```bash
-# Copy the backend-only Nginx configuration
+# Check if listening on port 8000
+sudo netstat -tlnp | grep :8000
+
+# Test API
+curl http://127.0.0.1:8000/health
+```
+
+---
+
+### **Step 6: Configure Nginx (One-Time Setup)**
+
+**On the Droplet** (as root or with sudo):
+
+**Option A: Backend Only (API only)**
+
+```bash
+# Copy Nginx config
 sudo cp /home/mentraflow/mentraflow-backend/scripts/nginx.conf /etc/nginx/sites-available/mentraflow-api
+
+# Enable the site
 sudo ln -s /etc/nginx/sites-available/mentraflow-api /etc/nginx/sites-enabled/
-```
 
-#### **Option B: Frontend + Backend** (Recommended if deploying UI too)
-```bash
-# Copy the complete Nginx configuration (handles both frontend and backend)
-sudo cp /home/mentraflow/mentraflow-backend/scripts/nginx.conf.complete /etc/nginx/sites-available/mentraflow
-sudo ln -s /etc/nginx/sites-available/mentraflow /etc/nginx/sites-enabled/
-
-# Create frontend directory
-sudo mkdir -p /var/www/mentraflow-frontend
-sudo chown -R mentraflow:mentraflow /var/www/mentraflow-frontend
-```
-
-**Then for both options:**
-```bash
-# Remove default Nginx site
+# Remove default site
 sudo rm /etc/nginx/sites-enabled/default
 
 # Test configuration
@@ -203,192 +213,303 @@ sudo systemctl restart nginx
 sudo systemctl status nginx
 ```
 
-**Your API is now accessible at:**
-- `http://147.182.239.22/api/v1/...` (with Option B, frontend at root `/`)
-- `http://147.182.239.22/health`
-
-**Note:** See `docs/FRONTEND_BACKEND_DEPLOYMENT.md` for complete frontend + backend setup guide.
-
-### **Step 11: Set Up SSL (Let's Encrypt)**
-
-If you have a domain name pointing to your Droplet:
+**Option B: Frontend + Backend (if deploying UI too)**
 
 ```bash
-sudo certbot --nginx -d your-domain.com
+# Copy complete Nginx config
+sudo cp /home/mentraflow/mentraflow-backend/scripts/nginx.conf.complete /etc/nginx/sites-available/mentraflow
+
+# Enable the site
+sudo ln -s /etc/nginx/sites-available/mentraflow /etc/nginx/sites-enabled/
+
+# Remove default site
+sudo rm /etc/nginx/sites-enabled/default
+
+# Test configuration
+sudo nginx -t
+
+# Restart Nginx
+sudo systemctl restart nginx
 ```
 
-This will:
-- Get SSL certificate
-- Configure Nginx automatically
-- Set up auto-renewal
+---
 
-### **Step 12: Configure Firewall**
+### **Step 7: Verify Deployment**
+
+**From your local machine (test from outside the server):**
 
 ```bash
-# Allow SSH
-sudo ufw allow 22/tcp
+# Test health endpoint
+curl http://YOUR_DROPLET_IP/health
 
-# Allow HTTP and HTTPS
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
+# Test API endpoint
+curl http://YOUR_DROPLET_IP/api/v1/health
 
-# Enable firewall
-sudo ufw enable
-sudo ufw status
+# Test Swagger docs (open in browser)
+open http://YOUR_DROPLET_IP/docs
+# or
+curl http://YOUR_DROPLET_IP/docs
 ```
 
-### **Step 13: Set Up Logging**
+**Expected response:**
+```json
+{"status":"healthy","database":"connected","qdrant":"connected"}
+```
+
+**Expected response:**
+
+```json
+{"status":"healthy","database":"connected","qdrant":"connected"}
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### **Port 8000 Already in Use**
+
+If you see "Address already in use" errors:
 
 ```bash
-# View application logs
+# Find what's using port 8000
+sudo lsof -i :8000
+
+# Kill the process
+sudo fuser -k 8000/tcp
+
+# Or kill specific process
+sudo kill -9 PID
+
+# Check for other services
+sudo systemctl list-units --type=service | grep -i mentraflow
+
+# Stop conflicting services
+sudo systemctl stop mentraflow.service  # if old service exists
+```
+
+### **Service Fails to Start**
+
+```bash
+# Check logs
+sudo journalctl -u mentraflow-api -n 50 --no-pager
+
+# Check if .env file exists
+ls -la /home/mentraflow/mentraflow-backend/.env
+
+# Test app import
+cd /home/mentraflow/mentraflow-backend
+source venv/bin/activate
+python -c "from app.main import app; print('OK')"
+```
+
+### **Database Connection Issues**
+
+```bash
+# Check DATABASE_URL in .env
+grep DATABASE_URL /home/mentraflow/mentraflow-backend/.env
+
+# Test database connection
+cd /home/mentraflow/mentraflow-backend
+source venv/bin/activate
+python -c "
+import asyncio
+from app.infrastructure.database import check_db_connection
+print(asyncio.run(check_db_connection()))
+"
+```
+
+### **Migrations Fail**
+
+```bash
+# Check if alembic directory is uploaded
+ls -la /home/mentraflow/mentraflow-backend/alembic/
+
+# Check if app directory is complete
+ls -la /home/mentraflow/mentraflow-backend/app/
+
+# Re-upload if missing
+# From local machine:
+scp -r alembic/ mentraflow@YOUR_DROPLET_IP:/home/mentraflow/mentraflow-backend/
+scp -r app/ mentraflow@YOUR_DROPLET_IP:/home/mentraflow/mentraflow-backend/
+```
+
+---
+
+## 📝 Useful Commands
+
+### **Service Management**
+
+```bash
+# Check API status
+sudo systemctl status mentraflow-api
+
+# Restart API
+sudo systemctl restart mentraflow-api
+
+# Stop API
+sudo systemctl stop mentraflow-api
+
+# View API logs
 sudo journalctl -u mentraflow-api -f
 
+# View last 100 log lines
+sudo journalctl -u mentraflow-api -n 100 --no-pager
+```
+
+### **Nginx Management**
+
+```bash
+# Check Nginx status
+sudo systemctl status nginx
+
+# Restart Nginx
+sudo systemctl restart nginx
+
+# Test Nginx config
+sudo nginx -t
+
 # View Nginx logs
-sudo tail -f /var/log/nginx/access.log
-sudo tail -f /var/log/nginx/error.log
+sudo tail -f /var/log/nginx/mentraflow-api-access.log
+sudo tail -f /var/log/nginx/mentraflow-api-error.log
+```
+
+### **Deployment**
+
+```bash
+# From local machine - deploy code
+./scripts/deploy_to_droplet.sh
+
+# On server - after deployment
+sudo systemctl restart mentraflow-api
 ```
 
 ---
 
 ## 🔄 Updating the Application
 
-### **Pull Latest Code**
+### **Quick Update Process**
+
+**From your local machine:**
+
+```bash
+# Deploy code changes
+./scripts/deploy_to_droplet.sh
+```
+
+**On the Droplet (SSH in):**
+
+```bash
+# Quick update (recommended)
+cd /home/mentraflow/mentraflow-backend
+bash scripts/update_on_droplet.sh
+```
+
+This script automatically:
+- Updates Python dependencies (if `requirements.txt` changed)
+- Runs database migrations (if any new ones)
+- Restarts the service
+
+### **Manual Update (if needed)**
+
+If you prefer to update manually:
 
 ```bash
 cd /home/mentraflow/mentraflow-backend
-git pull origin main
-
-# Activate virtual environment
 source venv/bin/activate
 
-# Install new dependencies (if any)
+# Install new dependencies (if requirements.txt changed)
 pip install -r requirements.txt
 
-# Run migrations (if any)
+# Run new migrations (if any)
 alembic upgrade head
 
 # Restart service
 sudo systemctl restart mentraflow-api
+
+# Verify
+sudo systemctl status mentraflow-api
+curl http://127.0.0.1:8000/health
 ```
 
 ---
 
-## 🐛 Troubleshooting
+## 🔒 Security Best Practices
 
-### **Service Won't Start**
+1. **Firewall**: Configure UFW to only allow necessary ports
+   ```bash
+   sudo ufw allow 22/tcp    # SSH
+   sudo ufw allow 80/tcp    # HTTP
+   sudo ufw allow 443/tcp   # HTTPS
+   sudo ufw enable
+   ```
 
-```bash
-# Check service status
-sudo systemctl status mentraflow-api
+2. **SSH Keys**: Use SSH keys instead of passwords
+3. **Non-Root User**: Application runs as `mentraflow` user, not root
+4. **Environment Variables**: Never commit `.env` file to git
+5. **SSL/HTTPS**: Set up SSL certificate when you have a domain
 
-# Check logs
-sudo journalctl -u mentraflow-api -n 50
+---
 
-# Check if port is in use
-sudo netstat -tulpn | grep 8000
-```
+## 🌐 Setting Up SSL/HTTPS (When You Have a Domain)
 
-### **Application Not Accessible**
-
-```bash
-# Check if service is running
-sudo systemctl status mentraflow-api
-
-# Check Nginx status
-sudo systemctl status nginx
-
-# Check firewall
-sudo ufw status
-
-# Test from server
-curl http://localhost:8000/health
-```
-
-### **Database Connection Issues**
+Once you have a domain name pointing to your Droplet:
 
 ```bash
-# Test database connection
-psql $DATABASE_URL
+# Get SSL certificate
+sudo certbot --nginx -d your-domain.com
 
-# Check if DATABASE_URL is set correctly
-echo $DATABASE_URL
+# Certbot will automatically configure Nginx for HTTPS
+# Your API will be accessible at https://your-domain.com
 ```
 
 ---
 
 ## 📊 Monitoring
 
-### **Resource Usage**
+### **Check Resource Usage**
 
 ```bash
 # CPU and memory
 htop
+# or
+top
 
 # Disk usage
 df -h
 
-# Application logs
-sudo journalctl -u mentraflow-api -f
-```
-
-### **Set Up Monitoring (Optional)**
-
-Consider setting up:
-- DigitalOcean Monitoring (built-in)
-- Uptime monitoring (UptimeRobot, Pingdom)
-- Application monitoring (Sentry for errors)
-
----
-
-## 🔒 Security Checklist
-
-- [ ] Firewall configured (UFW)
-- [ ] SSH key authentication (disable password auth)
-- [ ] Non-root user for application
-- [ ] SSL certificate installed
-- [ ] Environment variables secured (not in code)
-- [ ] Database uses SSL
-- [ ] Regular system updates
-- [ ] Fail2ban installed (optional but recommended)
-
----
-
-## 💰 Cost
-
-Your current setup:
-- **Droplet**: 2GB RAM / 50GB Disk - ~$12/month
-- **Database**: Managed PostgreSQL (if using) - ~$15/month
-- **Qdrant**: Cloud (if using) - Free tier or ~$25/month
-- **Total**: ~$27-52/month
-
----
-
-## 🚀 Quick Commands Reference
-
-```bash
-# Start service
-sudo systemctl start mentraflow-api
-
-# Stop service
-sudo systemctl stop mentraflow-api
-
-# Restart service
-sudo systemctl restart mentraflow-api
-
-# View logs
-sudo journalctl -u mentraflow-api -f
-
-# Check status
-sudo systemctl status mentraflow-api
-
-# Reload Nginx
-sudo systemctl reload nginx
-
-# Test Nginx config
-sudo nginx -t
+# Check service status
+sudo systemctl status mentraflow-api nginx
 ```
 
 ---
 
-**Last Updated:** 2025-01-XX
+## ✅ Deployment Checklist
 
+- [ ] Droplet created and accessible
+- [ ] SSH keys set up
+- [ ] Server setup completed (Python, Nginx, etc.)
+- [ ] Code deployed to Droplet
+- [ ] `.env` file configured
+- [ ] Virtual environment created
+- [ ] Dependencies installed
+- [ ] Database migrations run
+- [ ] Systemd service configured and running
+- [ ] Nginx configured and running
+- [ ] API accessible at `http://YOUR_DROPLET_IP/api/v1/...`
+- [ ] Health check returns `{"status":"healthy"}`
+
+---
+
+## 🆘 Getting Help
+
+If you encounter issues:
+
+1. Check service logs: `sudo journalctl -u mentraflow-api -n 100`
+2. Check Nginx logs: `sudo tail -f /var/log/nginx/mentraflow-api-error.log`
+3. Verify all files are uploaded correctly
+4. Check `.env` file has correct values
+5. Verify database and Qdrant are accessible
+
+---
+
+**Last Updated:** 2025-12-29

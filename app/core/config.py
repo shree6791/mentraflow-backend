@@ -127,6 +127,13 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False, description="Enable debug mode (verbose logging, FastAPI debug features)")
 
     # ============================================================================
+    # LangChain Configuration (Optional)
+    # ============================================================================
+    LANGCHAIN_TRACING_V2: bool = Field(
+        default=False, description="Enable LangSmith tracing (optional, for debugging LangChain operations)"
+    )
+
+    # ============================================================================
     # Pydantic Configuration
     # ============================================================================
     model_config = SettingsConfigDict(
@@ -171,7 +178,7 @@ class Settings(BaseSettings):
         except (ValueError, TypeError):
             return 8000
 
-    @field_validator("AUTO_CREATE_TABLES", "DROP_AND_RECREATE_TABLES", "DROP_AND_RECREATE_COLLECTIONS", "DEBUG", mode="before")
+    @field_validator("AUTO_CREATE_TABLES", "DROP_AND_RECREATE_TABLES", "DROP_AND_RECREATE_COLLECTIONS", "DEBUG", "LANGCHAIN_TRACING_V2", mode="before")
     @classmethod
     def parse_bool(cls, v: Any) -> bool:
         """Parse boolean values, stripping comments and converting string to bool."""

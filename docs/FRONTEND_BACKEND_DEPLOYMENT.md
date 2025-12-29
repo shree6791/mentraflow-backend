@@ -14,16 +14,16 @@ Yes! You can deploy both your UI (frontend) and backend on the same Droplet. Thi
 ## 🎯 Deployment Options
 
 ### **Option 1: Same Domain, Different Paths** (Recommended)
-- Backend: `http://147.182.239.22/api/v1/...`
-- Frontend: `http://147.182.239.22/` (root)
+- Backend: `http://YOUR_DROPLET_IP/api/v1/...` or `http://your-domain.com/api/v1/...`
+- Frontend: `http://YOUR_DROPLET_IP/` (root) or `http://your-domain.com/`
 
 ### **Option 2: Subdomains**
 - Backend: `api.your-domain.com`
 - Frontend: `app.your-domain.com` or `your-domain.com`
 
 ### **Option 3: Different Ports** (Not recommended)
-- Backend: `http://147.182.239.22:8000`
-- Frontend: `http://147.182.239.22:3000`
+- Backend: `http://YOUR_DROPLET_IP:8000`
+- Frontend: `http://YOUR_DROPLET_IP:3000`
 
 **We'll use Option 1** (same domain, different paths) - it's the cleanest.
 
@@ -58,9 +58,9 @@ From your **frontend repository**:
 
 ```bash
 # Upload built frontend files
-scp -r dist/* root@147.182.239.22:/var/www/mentraflow-frontend/
+scp -r dist/* mentraflow@YOUR_DROPLET_IP:/var/www/mentraflow-frontend/
 # Or if your build folder is named differently:
-scp -r build/* root@147.182.239.22:/var/www/mentraflow-frontend/
+scp -r build/* mentraflow@YOUR_DROPLET_IP:/var/www/mentraflow-frontend/
 ```
 
 **Or use the deployment script** (see below for `deploy_frontend_to_droplet.sh`):
@@ -80,7 +80,7 @@ Here's the complete Nginx config for both frontend and backend:
 ```nginx
 server {
     listen 80;
-    server_name 147.182.239.22;  # Or your domain name
+    server_name YOUR_DROPLET_IP your-domain.com;  # Replace with your IP or domain
 
     # Increase body size for file uploads
     client_max_body_size 50M;
@@ -146,7 +146,7 @@ sudo chown -R $USER:$USER /var/www/mentraflow-frontend
 
 # 2. Upload your built frontend files
 # (From your local machine, after building)
-scp -r dist/* root@147.182.239.22:/var/www/mentraflow-frontend/
+scp -r dist/* mentraflow@YOUR_DROPLET_IP:/var/www/mentraflow-frontend/
 
 # 3. Update Nginx config
 sudo nano /etc/nginx/sites-available/mentraflow-api
@@ -164,7 +164,7 @@ sudo systemctl restart nginx
 ### **React/Vite**
 ```bash
 npm run build  # Creates `dist/` folder
-scp -r dist/* root@147.182.239.22:/var/www/mentraflow-frontend/
+scp -r dist/* mentraflow@YOUR_DROPLET_IP:/var/www/mentraflow-frontend/
 ```
 
 ### **Next.js**
@@ -173,10 +173,10 @@ npm run build  # Creates `.next/` folder
 # Next.js needs special setup - see below
 ```
 
-### **Vue
+### **Vue**
 ```bash
 npm run build  # Creates `dist/` folder
-scp -r dist/* root@147.182.239.22:/var/www/mentraflow-frontend/
+scp -r dist/* mentraflow@YOUR_DROPLET_IP:/var/www/mentraflow-frontend/
 ```
 
 ---
@@ -189,9 +189,11 @@ Your frontend needs to know the API URL. Common approaches:
 
 Create `.env.production` in your frontend:
 ```env
-VITE_API_URL=http://147.182.239.22/api/v1
+VITE_API_URL=http://YOUR_DROPLET_IP/api/v1
 # or
-REACT_APP_API_URL=http://147.182.239.22/api/v1
+REACT_APP_API_URL=http://YOUR_DROPLET_IP/api/v1
+# When you have a domain:
+# VITE_API_URL=https://your-domain.com/api/v1
 ```
 
 Then build:
@@ -205,7 +207,9 @@ Serve a `config.js` file that your frontend loads:
 ```javascript
 // /var/www/mentraflow-frontend/config.js
 window.APP_CONFIG = {
-  API_URL: 'http://147.182.239.22/api/v1'
+  API_URL: 'http://YOUR_DROPLET_IP/api/v1'
+  // When you have a domain:
+  // API_URL: 'https://your-domain.com/api/v1'
 };
 ```
 
@@ -250,7 +254,7 @@ Then:
 ```bash
 # 1. Set up backend (already done via DEPLOYMENT_DROPLET.md)
 # 2. Create frontend directory on Droplet
-ssh root@147.182.239.22
+ssh mentraflow@YOUR_DROPLET_IP
 sudo mkdir -p /var/www/mentraflow-frontend
 sudo chown -R mentraflow:mentraflow /var/www/mentraflow-frontend
 
@@ -271,7 +275,7 @@ cd /path/to/mentraflow-backend
 ./scripts/deploy_to_droplet.sh
 
 # Or manually:
-ssh root@147.182.239.22
+ssh mentraflow@YOUR_DROPLET_IP
 cd /home/mentraflow/mentraflow-backend
 git pull  # or rsync from local
 source venv/bin/activate
@@ -282,13 +286,10 @@ sudo systemctl restart mentraflow-api
 
 **Frontend (from frontend repo):**
 ```bash
-# Use the frontend deployment script (see below)
+# Build and upload
 cd /path/to/mentraflow-frontend
-./scripts/deploy_to_droplet.sh
-
-# Or manually:
 npm run build
-scp -r dist/* root@147.182.239.22:/var/www/mentraflow-frontend/
+scp -r dist/* mentraflow@YOUR_DROPLET_IP:/var/www/mentraflow-frontend/
 # That's it! No restart needed for static files
 ```
 
@@ -326,5 +327,5 @@ I'll create an updated `nginx.conf` that handles both frontend and backend.
 
 ---
 
-**Last Updated:** 2025-01-XX
+**Last Updated:** 2025-12-29
 

@@ -31,6 +31,14 @@ if ! id "mentraflow" &>/dev/null; then
     echo "👤 Creating application user..."
     sudo adduser --disabled-password --gecos "" mentraflow
     sudo usermod -aG sudo mentraflow
+    echo "✅ User 'mentraflow' created and added to sudo group"
+else
+    # Ensure user is in sudo group (in case it was created without it)
+    if ! groups mentraflow | grep -q sudo; then
+        echo "👤 Adding mentraflow to sudo group..."
+        sudo usermod -aG sudo mentraflow
+        echo "✅ User 'mentraflow' added to sudo group"
+    fi
 fi
 
 # Set up application directory
@@ -44,12 +52,10 @@ fi
 echo "✅ Server setup complete!"
 echo ""
 echo "📋 Next steps:"
-echo "   1. Switch to application user: su - mentraflow"
-echo "   2. Clone your repository or upload code to $APP_DIR"
-echo "   3. Set up Python virtual environment"
-echo "   4. Install dependencies"
-echo "   5. Configure .env file"
-echo "   6. Run migrations"
-echo "   7. Set up systemd service"
-echo "   8. Configure Nginx"
+echo "   1. Set up SSH keys for mentraflow user (from your local machine)"
+echo "   2. Deploy code using: ./scripts/deploy_to_droplet.sh (from local machine)"
+echo "   3. SSH as mentraflow user and run: bash scripts/install_app_on_droplet.sh"
+echo "   4. Set up systemd service and Nginx (see install script output)"
+echo ""
+echo "📚 See docs/DEPLOYMENT_DROPLET.md for complete deployment guide"
 

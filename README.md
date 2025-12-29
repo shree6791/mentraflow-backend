@@ -37,9 +37,9 @@ All documentation is available in the [`docs/`](./docs/) directory:
 - **[OpenAI Setup Guide](./docs/OPENAI_SETUP_GUIDE.md)** - OpenAI API key and model configuration
 - **[Database Fields Explanation](./docs/DATABASE_FIELDS_EXPLANATION.md)** - Why we need `steps`, `metadata` fields in tables
 - **[Droplet Deployment Guide](./docs/DEPLOYMENT_DROPLET.md)** - **Complete guide for Droplet (VPS) deployment** ⭐
+- **[Updating Code on Droplet](./docs/UPDATING_CODE.md)** - **Quick reference for code updates** 🚀
+- **[Deployment Status & Checklist](./docs/DEPLOYMENT_STATUS.md)** - What's complete and what's optional
 - **[Frontend + Backend Deployment](./docs/FRONTEND_BACKEND_DEPLOYMENT.md)** - Deploy both UI and API on same Droplet (assumes separate repos)
-- **[Nginx Setup Guide](./docs/NGINX_SETUP.md)** - One-time Nginx configuration (2 minutes)
-- **[Alembic Migrations](./docs/alembic/README.md)** - Database migration guide
 
 ## Available Make Targets
 

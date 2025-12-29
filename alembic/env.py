@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 # Import your models and database config
-from app.infrastructure.database import Base
+from app.infrastructure.database import Base, normalize_database_url
 from app.core.config import settings
 
 # Import all models here for autogenerate to work
@@ -23,8 +23,11 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Set the SQLAlchemy URL from settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Normalize database URL (remove sslmode for asyncpg compatibility)
+normalized_db_url = normalize_database_url(settings.DATABASE_URL)
+
+# Set the SQLAlchemy URL from settings (normalized)
+config.set_main_option("sqlalchemy.url", normalized_db_url)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
@@ -74,9 +77,12 @@ async def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    # Use DATABASE_URL from settings (env)
+    # Normalize database URL (remove sslmode for asyncpg compatibility)
+    normalized_db_url = normalize_database_url(settings.DATABASE_URL)
+    
+    # Use normalized DATABASE_URL from settings
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.DATABASE_URL
+    configuration["sqlalchemy.url"] = normalized_db_url
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",
