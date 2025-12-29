@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.constants import (
     DEFAULT_AUTO_FLASHCARDS_AFTER_INGEST,
     DEFAULT_AUTO_INGEST_ON_UPLOAD,
+    DEFAULT_AUTO_KG_AFTER_INGEST,
     DEFAULT_AUTO_SUMMARY_AFTER_INGEST,
     DEFAULT_FLASHCARD_MODE,
 )
@@ -31,6 +32,9 @@ class PreferenceRead(BaseModel):
     auto_flashcards_after_ingest: bool | None = Field(
         default=DEFAULT_AUTO_FLASHCARDS_AFTER_INGEST, description="Auto-flashcards after ingest"
     )
+    auto_kg_after_ingest: bool | None = Field(
+        default=DEFAULT_AUTO_KG_AFTER_INGEST, description="Auto-knowledge graph extraction after ingest"
+    )
     default_flashcard_mode: str | None = Field(
         default=DEFAULT_FLASHCARD_MODE, description="Default flashcard mode"
     )
@@ -41,6 +45,7 @@ class PreferenceUpdate(BaseModel):
     auto_ingest_on_upload: bool | None = Field(default=None)
     auto_summary_after_ingest: bool | None = Field(default=None)
     auto_flashcards_after_ingest: bool | None = Field(default=None)
+    auto_kg_after_ingest: bool | None = Field(default=None)
     default_flashcard_mode: str | None = Field(default=None)
 
 
@@ -64,6 +69,7 @@ async def get_preferences(
             auto_ingest_on_upload=preference.auto_ingest_on_upload,
             auto_summary_after_ingest=preference.auto_summary_after_ingest,
             auto_flashcards_after_ingest=preference.auto_flashcards_after_ingest,
+            auto_kg_after_ingest=preference.auto_kg_after_ingest,
             default_flashcard_mode=preference.default_flashcard_mode,
         )
     except Exception as e:
@@ -90,6 +96,7 @@ async def update_preferences(
             auto_ingest_on_upload=request.auto_ingest_on_upload,
             auto_summary_after_ingest=request.auto_summary_after_ingest,
             auto_flashcards_after_ingest=request.auto_flashcards_after_ingest,
+            auto_kg_after_ingest=request.auto_kg_after_ingest,
             default_flashcard_mode=request.default_flashcard_mode,
         )
         return PreferenceRead(
@@ -97,6 +104,7 @@ async def update_preferences(
             auto_ingest_on_upload=preference.auto_ingest_on_upload,
             auto_summary_after_ingest=preference.auto_summary_after_ingest,
             auto_flashcards_after_ingest=preference.auto_flashcards_after_ingest,
+            auto_kg_after_ingest=preference.auto_kg_after_ingest,
             default_flashcard_mode=preference.default_flashcard_mode,
         )
     except ValueError as e:

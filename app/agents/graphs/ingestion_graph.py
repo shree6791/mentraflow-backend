@@ -42,8 +42,7 @@ def build_ingestion_graph(service_tools: Any, db: Any) -> StateGraph:
     workflow.add_node("store_raw_text", _store_raw_text)
     workflow.add_node("chunk_document", _chunk_document)
     workflow.add_node("embed_chunks", _embed_chunks)
-    workflow.add_node("generate_summary", _generate_summary)  # Optional: generate summary after ingest
-    workflow.add_node("generate_flashcards", _generate_flashcards)  # Optional: generate flashcards after ingest
+    workflow.add_node("generate_optional_content", _generate_optional_content)  # Parallel: summary, flashcards, KG
     workflow.add_node("update_status", _update_status)
     workflow.add_node("handle_error", _handle_error)
 
@@ -65,20 +64,13 @@ def build_ingestion_graph(service_tools: Any, db: Any) -> StateGraph:
     workflow.add_conditional_edges(
         "embed_chunks",
         _should_continue,
-        {"continue": "generate_summary", "error": "handle_error"},
+        {"continue": "generate_optional_content", "error": "handle_error"},
     )
     
-    # Summary is optional - always continue even on failure
+    # Optional content generation (summary, flashcards, KG) - always continue even on failure
     workflow.add_conditional_edges(
-        "generate_summary",
-        _should_continue_after_summary,
-        {"continue": "generate_flashcards", "error": "generate_flashcards"},
-    )
-    
-    # Flashcards are optional - always continue even on failure
-    workflow.add_conditional_edges(
-        "generate_flashcards",
-        _should_continue_after_summary,  # Reuse same logic - always continue
+        "generate_optional_content",
+        _should_continue_after_summary,  # Always continue - failures don't block
         {"continue": "update_status", "error": "update_status"},
     )
     
@@ -284,6 +276,28 @@ async def _embed_chunks(state: IngestionState) -> IngestionState:
     return result
 
 
+async def _generate_optional_content(state: IngestionState) -> IngestionState:
+    """Generate summary, flashcards, and KG in parallel (best effort - failures don't block)."""
+    import asyncio
+    
+    # Run all three operations in parallel
+    # Each function handles its own errors internally, but we log any unexpected exceptions
+    results = await asyncio.gather(
+        _generate_summary(state),
+        _generate_flashcards(state),
+        _generate_kg(state),
+        return_exceptions=True,  # Don't raise exceptions, let each function handle them
+    )
+    
+    # Log any unexpected exceptions (shouldn't happen since each function handles errors)
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            operation = ["summary", "flashcards", "kg"][i]
+            logger.warning(f"Unexpected exception in {operation} generation: {str(result)}", exc_info=result)
+    
+    return state
+
+
 async def _generate_summary(state: IngestionState) -> IngestionState:
     """Generate summary after ingestion (best effort - failures don't block)."""
     input_data = state["input_data"]
@@ -372,6 +386,8 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
         pref_service = UserPreferenceService(db)
         preferences = await pref_service.get_preferences(user_id=input_data.user_id)
         
+        logger.info(f"Flashcard generation check - auto_flashcards_after_ingest: {preferences.auto_flashcards_after_ingest}, document_id: {input_data.document_id}")
+        
         if preferences.auto_flashcards_after_ingest:
             await _log_step(state, "flashcards", "started")
             # Use FlashcardAgent for consistency with other LLM operations
@@ -390,10 +406,16 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
             )
             # Run without logging (already logged in ingestion graph)
             try:
+                logger.info(f"Starting flashcard generation for document {input_data.document_id} with mode {flashcard_mode}")
                 flashcard_output = await flashcard_agent.run_without_logging(flashcard_input)
+                logger.info(f"Flashcard agent returned: flashcards_created={flashcard_output.flashcards_created if flashcard_output else 0}, reason={flashcard_output.reason if flashcard_output else 'None'}")
+                
                 # Verify flashcards were actually created
                 if not flashcard_output:
                     raise ValueError("Flashcard agent returned empty output")
+                
+                # Ensure any pending commits are flushed before querying
+                await db.flush()
                 
                 # Verify flashcards were stored in database
                 from sqlalchemy import select
@@ -404,6 +426,7 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
                 )
                 result = await db.execute(stmt)
                 flashcards_in_db = result.scalars().all()
+                logger.info(f"Found {len(flashcards_in_db)} flashcards in database for document {input_data.document_id}, workspace {input_data.workspace_id}")
                 
                 if flashcard_output.flashcards_created > 0:
                     if len(flashcards_in_db) > 0:
@@ -451,6 +474,7 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
                 # Re-raise to be caught by outer try/except
                 raise
         else:
+            logger.info(f"Flashcard generation skipped - auto_flashcards_after_ingest is false for user {input_data.user_id}")
             await _log_step(
                 state,
                 "flashcards",
@@ -459,7 +483,99 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
             )
     except Exception as e:
         # Log but don't fail - flashcard generation is optional
+        logger.error(f"Flashcard generation failed for document {input_data.document_id}: {str(e)}", exc_info=True)
         await _log_step(state, "flashcards", "failed", error=str(e))
+    
+    return state
+
+
+async def _generate_kg(state: IngestionState) -> IngestionState:
+    """Generate knowledge graph after ingestion (best effort - failures don't block)."""
+    input_data = state["input_data"]
+    db = state["db"]
+    
+    try:
+        # Check user preferences for auto_kg_after_ingest
+        from app.services.user_preference_service import UserPreferenceService
+        pref_service = UserPreferenceService(db)
+        preferences = await pref_service.get_preferences(user_id=input_data.user_id)
+        
+        if preferences.auto_kg_after_ingest:
+            await _log_step(state, "kg_extraction", "started")
+            # Use KGExtractionAgent for consistency with other LLM operations
+            from app.agents.kg_extraction_agent import KGExtractionAgent
+            from app.agents.types import KGExtractionAgentInput
+            
+            kg_agent = KGExtractionAgent(db)
+            kg_input = KGExtractionAgentInput(
+                workspace_id=input_data.workspace_id,
+                user_id=input_data.user_id,
+                source_document_id=input_data.document_id,
+            )
+            # Run without logging (already logged in ingestion graph)
+            try:
+                kg_output = await kg_agent.run_without_logging(kg_input)
+                # Verify KG was actually extracted
+                if not kg_output:
+                    raise ValueError("KG extraction agent returned empty output")
+                
+                # Verify concepts and edges were stored in database
+                from sqlalchemy import select
+                from app.models.concept import Concept
+                from app.models.kg_edge import KGEdge
+                
+                # Check concepts
+                stmt = select(Concept).where(
+                    Concept.workspace_id == input_data.workspace_id
+                )
+                result = await db.execute(stmt)
+                concepts_in_db = result.scalars().all()
+                
+                # Check edges
+                stmt = select(KGEdge).where(
+                    KGEdge.workspace_id == input_data.workspace_id
+                )
+                result = await db.execute(stmt)
+                edges_in_db = result.scalars().all()
+                
+                if kg_output.concepts_written > 0 or kg_output.edges_written > 0:
+                    await _log_step(
+                        state,
+                        "kg_extraction",
+                        "completed",
+                        details={
+                            "concepts_written": kg_output.concepts_written,
+                            "edges_written": kg_output.edges_written,
+                            "concepts_in_db": len(concepts_in_db),
+                            "edges_in_db": len(edges_in_db),
+                            "stored_in_db": True,
+                        },
+                    )
+                else:
+                    # No concepts/edges extracted (might be due to insufficient content)
+                    await _log_step(
+                        state,
+                        "kg_extraction",
+                        "completed",
+                        details={
+                            "concepts_written": 0,
+                            "edges_written": 0,
+                            "reason": "no_extractable_content",
+                        },
+                    )
+            except Exception as kg_error:
+                # Re-raise to be caught by outer try/except
+                raise
+        else:
+            await _log_step(
+                state,
+                "kg_extraction",
+                "skipped",
+                details={"reason": "auto_kg_after_ingest is false"},
+            )
+    except Exception as e:
+        # Log but don't fail - KG extraction is optional
+        await _log_step(state, "kg_extraction", "failed", error=str(e))
     
     return state
 

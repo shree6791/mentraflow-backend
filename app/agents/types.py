@@ -80,8 +80,8 @@ class FlashcardAgentInput(BaseModel):
     user_id: uuid.UUID = Field(description="User ID")
     source_document_id: uuid.UUID = Field(description="Source document ID")
     mode: str = Field(
-        default="key_terms",
-        description="Generation mode: key_terms, qa, or cloze"
+        default="mcq",
+        description="Generation mode: qa or mcq (default: mcq)"
     )
 
 

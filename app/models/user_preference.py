@@ -35,7 +35,8 @@ class UserPreference(Base):
     auto_ingest_on_upload: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     auto_summary_after_ingest: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     auto_flashcards_after_ingest: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
-    default_flashcard_mode: Mapped[str | None] = mapped_column(Text, nullable=True, default="qa")
+    auto_kg_after_ingest: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    default_flashcard_mode: Mapped[str | None] = mapped_column(Text, nullable=True, default="mcq")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=func.now(),

@@ -70,7 +70,7 @@ class FlashcardService(BaseService):
             workspace_id: Workspace ID
             user_id: User ID
             document_id: Document ID
-            card_type: Card type (mode) - "basic", "qa", or "cloze"
+            card_type: Card type (mode) - "qa" or "mcq"
             limit: Maximum number of results to return
             
         Returns:

@@ -54,8 +54,9 @@ class KGExtractionState(TypedDict):
     extracted_edges: list[ExtractedEdge]
     error: str | None
     status: Literal[
-        "pending", "retrieving", "extracting", "upserting_concepts", "upserting_edges", "completed", "failed"
+        "pending", "retrieving", "extracting", "upserting_concepts", "upserting_edges", "finding_relations", "completed", "failed"
     ]
+    related_edges_created: list[Any]  # Edges created to existing concepts
     service_tools: Any
     llm: Any
     system_prompt: str
@@ -82,6 +83,7 @@ def build_kg_extraction_graph(service_tools: Any, llm: Any, system_prompt: str) 
     workflow.add_node("build_name_mapping", _build_name_mapping)
     workflow.add_node("prepare_edges", _prepare_edges)
     workflow.add_node("upsert_edges", _upsert_edges)
+    workflow.add_node("find_related_concepts", _find_related_concepts)  # Find relations to existing concepts
     workflow.add_node("build_output", _build_output)
     workflow.add_node("handle_error", _handle_error)
 
@@ -127,8 +129,18 @@ def build_kg_extraction_graph(service_tools: Any, llm: Any, system_prompt: str) 
         "upsert_edges",
         _should_continue,
         {
-            "continue": "build_output",
+            "continue": "find_related_concepts",
             "error": "handle_error",
+        },
+    )
+    
+    # Find related concepts and create edges (optional - failures don't block)
+    workflow.add_conditional_edges(
+        "find_related_concepts",
+        _should_continue,  # Always continue even on failure
+        {
+            "continue": "build_output",
+            "error": "build_output",  # Continue to output even if relation finding fails
         },
     )
     
@@ -283,6 +295,152 @@ async def _upsert_edges(state: KGExtractionState) -> KGExtractionState:
         }
     except Exception as e:
         return {**state, "error": str(e), "status": "failed"}
+
+
+async def _find_related_concepts(state: KGExtractionState) -> KGExtractionState:
+    """Find relations to existing concepts via semantic search in Qdrant.
+    
+    For each newly created concept:
+    1. Generate embedding for the concept (name + description)
+    2. Search Qdrant concepts collection for similar existing concepts
+    3. Create edges between new concepts and similar existing concepts (similarity > 0.7)
+    """
+    import uuid
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    input_data = state["input_data"]
+    created_concepts = state.get("created_concepts", [])
+    service_tools = state["service_tools"]
+    
+    # Similarity threshold for creating relations
+    SIMILARITY_THRESHOLD = 0.7
+    MAX_RELATIONS_PER_CONCEPT = 5  # Limit to top 5 similar concepts
+    
+    related_edges = []
+    
+    try:
+        if not created_concepts:
+            return {**state, "related_edges_created": [], "status": "finding_relations"}
+        
+        # Get embedding service
+        from app.services.embedding_service import EmbeddingService
+        from app.infrastructure.qdrant import QdrantClientWrapper
+        
+        embedding_service = EmbeddingService(service_tools.db)
+        qdrant_client = QdrantClientWrapper()
+        
+        # Process each newly created concept
+        for concept in created_concepts:
+            try:
+                # Generate embedding for concept (name + description)
+                concept_text = concept.name
+                if concept.description:
+                    concept_text = f"{concept.name}: {concept.description}"
+                
+                # Generate embedding
+                vector, _ = await embedding_service._generate_embedding(concept_text)
+                
+                # Search for similar existing concepts in Qdrant (same workspace, exclude current concept)
+                # Note: We need to filter out the current concept and other newly created concepts
+                new_concept_ids = {str(c.id) for c in created_concepts}
+                
+                search_results = await qdrant_client.search_concepts(
+                    workspace_id=input_data.workspace_id,
+                    query_vector=vector,
+                    top_k=MAX_RELATIONS_PER_CONCEPT + len(created_concepts),  # Get extra to account for filtering
+                )
+                
+                # Filter out newly created concepts and apply similarity threshold
+                similar_concepts = [
+                    r for r in search_results
+                    if r.get("score", 0) >= SIMILARITY_THRESHOLD
+                    and r.get("id") not in new_concept_ids
+                ][:MAX_RELATIONS_PER_CONCEPT]
+                
+                # Create edges to similar existing concepts
+                for similar in similar_concepts:
+                    try:
+                        existing_concept_id = uuid.UUID(similar["id"])
+                        similarity_score = similar.get("score", 0.7)
+                        
+                        # Create bidirectional edge (related_to relationship)
+                        edge_data = {
+                            "src_type": "concept",
+                            "src_id": concept.id,
+                            "rel_type": "related_to",
+                            "dst_type": "concept",
+                            "dst_id": existing_concept_id,
+                            "weight": float(similarity_score),
+                            "evidence": {
+                                "similarity_score": float(similarity_score),
+                                "source": "semantic_search",
+                                "method": "qdrant_vector_search",
+                            },
+                        }
+                        
+                        # Upsert edge (will skip if already exists due to unique constraint)
+                        created_edge = await service_tools.kg_service.upsert_edges(
+                            input_data.workspace_id,
+                            input_data.user_id,
+                            [edge_data],
+                        )
+                        
+                        if created_edge:
+                            related_edges.extend(created_edge)
+                    except Exception as edge_error:
+                        # Log but continue - don't fail entire operation
+                        logger.warning(
+                            f"Failed to create edge from {concept.id} to {similar.get('id')}: {str(edge_error)}"
+                        )
+                        continue
+                
+                # Store concept embedding in Qdrant for future searches
+                # (This enables future concepts to find this one)
+                try:
+                    from datetime import datetime, timezone
+                    points = [{
+                        "id": str(concept.id),
+                        "vector": vector,
+                        "payload": {
+                            "workspace_id": str(input_data.workspace_id),
+                            "concept_id": str(concept.id),
+                            "name": concept.name,
+                            "concept_name": concept.name,  # For keyword indexing
+                            "description": concept.description or "",
+                            "created_at": int(datetime.now(timezone.utc).timestamp()),
+                        },
+                    }]
+                    await qdrant_client.upsert_concept_vectors(
+                        workspace_id=input_data.workspace_id,
+                        points=points,
+                    )
+                except Exception as qdrant_error:
+                    # Log but continue - embedding storage failure shouldn't block
+                    logger.warning(
+                        f"Failed to store concept embedding in Qdrant for {concept.id}: {str(qdrant_error)}"
+                    )
+                    
+            except Exception as concept_error:
+                # Log but continue processing other concepts
+                logger.warning(
+                    f"Failed to find relations for concept {concept.id}: {str(concept_error)}"
+                )
+                continue
+        
+        return {
+            **state,
+            "related_edges_created": related_edges,
+            "status": "finding_relations",
+        }
+    except Exception as e:
+        # Log but don't fail - relation finding is optional
+        logger.warning(f"Error finding related concepts: {str(e)}", exc_info=True)
+        return {
+            **state,
+            "related_edges_created": [],
+            "status": "finding_relations",
+        }
 
 
 async def _build_output(state: KGExtractionState) -> KGExtractionState:

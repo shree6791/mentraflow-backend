@@ -14,6 +14,8 @@ class FlashcardCard(LangChainBaseModel):
     front: str
     back: str
     card_type: str
+    options: list[str] | None = None  # For MCQ: list of answer options (A, B, C, D)
+    correct_answer: str | None = None  # For MCQ: the correct option (e.g., "A", "B", "C", "D")
 
 
 class FlashcardList(LangChainBaseModel):
@@ -205,7 +207,7 @@ For each flashcard, you should reference which chunk IDs (from the Chunk ID mark
         # Convert to service format with chunk_id tracking
         # Map card_type to match requested mode (validate in validation step)
         from app.core.constants import FLASHCARD_MODE_TO_CARD_TYPE
-        expected_type = FLASHCARD_MODE_TO_CARD_TYPE.get(input_data.mode, "basic")
+        expected_type = FLASHCARD_MODE_TO_CARD_TYPE.get(input_data.mode, "qa")
         
         # For now, we'll associate each card with all retrieved chunks
         # In a more sophisticated implementation, the LLM could specify which chunks
@@ -218,24 +220,39 @@ For each flashcard, you should reference which chunk IDs (from the Chunk ID mark
             card_type = card.card_type
             if card_type != expected_type:
                 # Try to map it
-                if input_data.mode == "key_terms" and card_type == "basic":
-                    card_type = "basic"  # OK
-                elif input_data.mode == "qa" and card_type == "qa":
+                if input_data.mode == "qa" and card_type == "qa":
                     card_type = "qa"  # OK
-                elif input_data.mode == "cloze" and card_type == "cloze":
-                    card_type = "cloze"  # OK
+                elif input_data.mode == "mcq" and card_type == "mcq":
+                    card_type = "mcq"  # OK
                 # Otherwise, use expected type
                 else:
                     card_type = expected_type
             
-            cards.append(
-                {
-                    "front": card.front,
-                    "back": card.back,
-                    "card_type": card_type,
-                    "source_chunk_ids": all_chunk_ids,  # Associate with all retrieved chunks
+            card_data = {
+                "front": card.front,
+                "back": card.back,
+                "card_type": card_type,
+                "source_chunk_ids": all_chunk_ids,  # Associate with all retrieved chunks
+            }
+            
+            # For MCQ cards, store options and correct answer in metadata
+            if card_type == "mcq" and card.options and card.correct_answer:
+                # Normalize back field to be just the letter (A, B, C, or D)
+                # LLM might return full answer text, but we need just the letter
+                back_normalized = card.back.strip().upper()
+                # Extract letter if it's in the back text, otherwise use correct_answer
+                if back_normalized in ["A", "B", "C", "D"]:
+                    card_data["back"] = back_normalized
+                else:
+                    # Use the correct_answer from metadata as the back
+                    card_data["back"] = card.correct_answer.upper()
+                
+                card_data["metadata"] = {
+                    "options": card.options,
+                    "correct_answer": card.correct_answer,
                 }
-            )
+            
+            cards.append(card_data)
 
         return {
             **state,
@@ -252,8 +269,8 @@ def _validate_card(card: dict, requested_mode: str) -> tuple[bool, str | None]:
     """Validate a single flashcard card.
     
     Args:
-        card: Card dictionary with front, back, card_type
-        requested_mode: Requested mode (key_terms, qa, cloze)
+        card: Card dictionary with front, back, card_type, and optionally options/correct_answer for MCQ
+        requested_mode: Requested mode (qa or mcq)
         
     Returns:
         Tuple of (is_valid, reason_if_invalid)
@@ -261,11 +278,57 @@ def _validate_card(card: dict, requested_mode: str) -> tuple[bool, str | None]:
     front = card.get("front", "")
     back = card.get("back", "")
     card_type = card.get("card_type", "")
+    metadata = card.get("metadata", {})
     
     # Check for empty fields
     if not front or not back:
         return False, "empty_field"
     
+    # Check card_type matches requested mode
+    from app.core.constants import FLASHCARD_MODE_TO_CARD_TYPE
+    expected_type = FLASHCARD_MODE_TO_CARD_TYPE.get(requested_mode, "qa")
+    if card_type != expected_type:
+        return False, "card_type_mismatch"
+    
+    # MCQ-specific validation
+    # NOTE: Document-specificity is enforced by the strict prompt instructions.
+    # The LLM is instructed to ONLY use information from provided chunks and never use outside knowledge.
+    if card_type == "mcq":
+        options = metadata.get("options", [])
+        correct_answer = metadata.get("correct_answer", "")
+        
+        # Check options exist and have exactly 4
+        if not options or len(options) != 4:
+            return False, "mcq_invalid_options"
+        
+        # Check correct_answer is valid (A, B, C, or D)
+        if correct_answer not in ["A", "B", "C", "D"]:
+            return False, "mcq_invalid_answer"
+        
+        # Check back matches correct_answer letter
+        # Back should be normalized to just the letter by this point (done in card processing)
+        back_normalized = back.strip().upper()
+        if back_normalized != correct_answer:
+            return False, "mcq_answer_mismatch"
+        
+        # Check each option is not empty and reasonable length
+        for option in options:
+            if not option or len(option.strip()) < 3:
+                return False, "mcq_option_too_short"
+            if len(option) > 200:  # Reasonable limit for MCQ options
+                return False, "mcq_option_too_long"
+        
+        # Check front (question) length
+        MAX_FRONT_LENGTH = 300  # MCQ questions can be longer
+        MIN_FRONT_LENGTH = 10
+        if len(front) > MAX_FRONT_LENGTH:
+            return False, "front_too_long"
+        if len(front) < MIN_FRONT_LENGTH:
+            return False, "front_too_short"
+        
+        return True, None
+    
+    # Non-MCQ validation (existing logic)
     # Check length limits
     MAX_FRONT_LENGTH = 200
     MAX_BACK_LENGTH = 300
@@ -285,12 +348,6 @@ def _validate_card(card: dict, requested_mode: str) -> tuple[bool, str | None]:
     
     if len(back) < MIN_BACK_LENGTH:
         return False, "back_too_short"
-    
-    # Check card_type matches requested mode
-    from app.core.constants import FLASHCARD_MODE_TO_CARD_TYPE
-    expected_type = FLASHCARD_MODE_TO_CARD_TYPE.get(requested_mode, "basic")
-    if card_type != expected_type:
-        return False, "card_type_mismatch"
     
     # Check for trivial content (same front and back, or very similar)
     if front.strip().lower() == back.strip().lower():

@@ -64,6 +64,7 @@ class KGExtractionAgent(BaseAgent[KGExtractionAgentInput, KGExtractionAgentOutpu
             "created_edges": [],
             "extracted_concepts": [],
             "extracted_edges": [],
+            "related_edges_created": [],
             "error": None,
             "status": "pending",
             "service_tools": self.service_tools,

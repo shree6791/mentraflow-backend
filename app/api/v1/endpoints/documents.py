@@ -384,7 +384,7 @@ class GenerateFlashcardsRequest(BaseModel):
 
     workspace_id: uuid.UUID = Field(description="Workspace ID")
     user_id: uuid.UUID = Field(description="User ID")
-    mode: str = Field(default="key_terms", description="Generation mode: key_terms, qa, or cloze")
+    mode: str = Field(default="mcq", description="Generation mode: qa or mcq (default: mcq)")
 
 
 class ExtractKGRequest(BaseModel):

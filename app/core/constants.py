@@ -10,20 +10,19 @@ Constants that are business logic defaults should be here.
 # ============================================================================
 
 # Valid flashcard generation modes
-FLASHCARD_MODES = {"key_terms", "qa", "cloze"}
+FLASHCARD_MODES = {"qa", "mcq"}
 
 # Default flashcard mode
-DEFAULT_FLASHCARD_MODE = "qa"
+DEFAULT_FLASHCARD_MODE = "mcq"
 
 # Mapping from flashcard mode to card type
 FLASHCARD_MODE_TO_CARD_TYPE = {
-    "key_terms": "basic",
     "qa": "qa",
-    "cloze": "cloze",
+    "mcq": "mcq",
 }
 
-# Valid card types
-CARD_TYPES = {"basic", "qa", "cloze"}
+# Valid card types (includes legacy types for backward compatibility with existing data)
+CARD_TYPES = {"basic", "qa", "cloze", "mcq"}
 
 # ============================================================================
 # User Preference Defaults
@@ -33,6 +32,7 @@ CARD_TYPES = {"basic", "qa", "cloze"}
 DEFAULT_AUTO_INGEST_ON_UPLOAD = True
 DEFAULT_AUTO_SUMMARY_AFTER_INGEST = True
 DEFAULT_AUTO_FLASHCARDS_AFTER_INGEST = True
+DEFAULT_AUTO_KG_AFTER_INGEST = True
 # Note: DEFAULT_FLASHCARD_MODE is used for both flashcard mode and preference default
 
 # ============================================================================

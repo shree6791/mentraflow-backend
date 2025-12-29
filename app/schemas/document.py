@@ -29,7 +29,6 @@ class DocumentRead(BaseModel):
     source_url: str | None = Field(default=None, description="Source URL")
     language: str | None = Field(default=None, description="Document language")
     status: str | None = Field(default=None, description="Document processing status")
-    content: str | None = Field(default=None, description="Document content")
     summary_text: str | None = Field(default=None, description="Auto-generated summary")
     last_run_id: uuid.UUID | None = Field(default=None, description="Last agent run ID")
     metadata: dict[str, Any] | None = Field(

@@ -148,7 +148,7 @@ Deep learning uses neural networks with many layers to learn complex patterns in
         flashcard_data = {
             "workspace_id": workspace_id,
             "user_id": owner_user_id,
-            "mode": "key_terms",
+            "mode": "mcq",
         }
         
         try:

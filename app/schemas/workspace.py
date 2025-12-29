@@ -17,7 +17,7 @@ class WorkspaceRead(BaseModel):
 
     id: uuid.UUID = Field(description="Workspace ID")
     name: str = Field(description="Workspace name")
-    owner_id: uuid.UUID = Field(description="Owner user ID")
+    user_id: uuid.UUID = Field(description="Owner user ID", alias="owner_id")
     plan_tier: str | None = Field(default=None, description="Subscription plan tier")
     created_at: datetime = Field(description="Workspace creation timestamp")
     updated_at: datetime = Field(description="Workspace last update timestamp")
