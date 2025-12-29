@@ -73,7 +73,7 @@ Create a new workspace.
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "name": "My Workspace",
   "plan_tier": "free",
-  "owner_id": "550e8400-e29b-41d4-a716-446655440001",
+  "user_id": "550e8400-e29b-41d4-a716-446655440001",
   "created_at": "2024-01-01T00:00:00Z"
 }
 ```
@@ -109,7 +109,7 @@ List workspaces.
     "id": "550e8400-e29b-41d4-a716-446655440000",
     "name": "My Workspace",
     "plan_tier": "free",
-    "owner_id": "550e8400-e29b-41d4-a716-446655440001",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "created_at": "2024-01-01T00:00:00Z"
   }
 ]
@@ -140,7 +140,7 @@ Get a workspace by ID.
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "name": "My Workspace",
   "plan_tier": "free",
-  "owner_id": "550e8400-e29b-41d4-a716-446655440001",
+  "user_id": "550e8400-e29b-41d4-a716-446655440001",
   "created_at": "2024-01-01T00:00:00Z"
 }
 ```
@@ -493,12 +493,12 @@ Generate flashcards from a document. Always runs asynchronously in background.
 {
   "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
   "user_id": "550e8400-e29b-41d4-a716-446655440001",
-  "mode": "key_terms"
+  "mode": "mcq"
 }
 ```
 
 **Request Body Parameters:**
-- `mode` (string, required): `key_terms`, `qa`, or `cloze`
+- `mode` (string, required): `qa` or `mcq` (default: `mcq`)
 
 **Response:** `202 Accepted`
 ```json
@@ -518,7 +518,7 @@ curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446
   -d '{
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
     "user_id": "550e8400-e29b-41d4-a716-446655440001",
-    "mode": "key_terms"
+    "mode": "mcq"
   }'
 ```
 
@@ -1113,7 +1113,8 @@ Get user preferences, creating defaults if not exists.
   "auto_ingest_on_upload": true,
   "auto_summary_after_ingest": true,
   "auto_flashcards_after_ingest": true,
-  "default_flashcard_mode": "qa"
+  "auto_kg_after_ingest": true,
+  "default_flashcard_mode": "mcq"
 }
 ```
 
@@ -1143,7 +1144,8 @@ Update user preferences.
   "auto_ingest_on_upload": false,
   "auto_summary_after_ingest": true,
   "auto_flashcards_after_ingest": true,
-  "default_flashcard_mode": "key_terms"
+  "auto_kg_after_ingest": true,
+  "default_flashcard_mode": "mcq"
 }
 ```
 
@@ -1157,7 +1159,8 @@ curl -X PATCH "http://localhost:8000/api/v1/preferences?user_id=550e8400-e29b-41
     "auto_ingest_on_upload": false,
     "auto_summary_after_ingest": true,
     "auto_flashcards_after_ingest": true,
-    "default_flashcard_mode": "key_terms"
+    "auto_kg_after_ingest": true,
+    "default_flashcard_mode": "mcq"
   }'
 ```
 
@@ -1584,7 +1587,7 @@ curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/flashcards" \
   -d '{
     "workspace_id": "{workspace_id}",
     "user_id": "550e8400-e29b-41d4-a716-446655440001",
-    "mode": "key_terms"
+    "mode": "mcq"
   }'
 ```
 
@@ -1601,9 +1604,6 @@ curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/kg" \
 ```
 
 **Note:** KG extraction always runs asynchronously. The response includes a `run_id` for tracking.
-    "mode": "key_terms"
-  }'
-```
 
 ### Step 7: Extract Knowledge Graph (Optional)
 ```bash

@@ -67,8 +67,8 @@ Your MentraFlow backend uses OpenAI in the following routes:
 
 3. **POST** `/api/v1/documents/{document_id}/flashcards` - Flashcard Generation
    - Uses: `gpt-4o-mini` for generating flashcards from document content
-   - Modes: `key_terms`, `qa`, or `cloze`
-   - Output: Flashcards with front/back content
+   - Modes: `qa` or `mcq` (default: `mcq`)
+   - Output: Flashcards with front/back content (MCQ includes options and correct_answer)
 
 4. **POST** `/api/v1/documents/{document_id}/kg` - Knowledge Graph Extraction
    - Uses: `gpt-4o-mini` for extracting concepts and relationships

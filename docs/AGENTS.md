@@ -151,7 +151,7 @@ class StudyChatAgentOutput(BaseModel):
 
 ## FlashcardAgent
 
-**Purpose:** Generate flashcards from documents in various modes (key_terms, qa, cloze) with quality validation.
+**Purpose:** Generate flashcards from documents in various modes (qa, mcq) with quality validation.
 
 **Agent Name:** `flashcard`
 
@@ -164,7 +164,7 @@ class FlashcardAgentInput(BaseModel):
     workspace_id: uuid.UUID                    # Workspace ID
     user_id: uuid.UUID                        # User ID
     source_document_id: uuid.UUID              # Source document ID
-    mode: str = "key_terms"                   # Generation mode: key_terms, qa, or cloze
+    mode: str = "mcq"                         # Generation mode: qa or mcq (default: mcq)
 ```
 
 ### Output Schema
@@ -189,7 +189,7 @@ class FlashcardAgentOutput(BaseModel):
 
 ### Key Features
 
-- **Multiple Modes:** Supports `key_terms`, `qa`, and `cloze` flashcard types
+- **Multiple Modes:** Supports `qa` and `mcq` flashcard types (default: `mcq`)
 - **Quality Control:** Validates flashcards for length, content quality, and mode matching
 - **Duplicate Prevention:** Tracks flashcards by `batch_id` and can detect existing flashcards
 - **Bad Card Pruning:** Drops trivial, repetitive, or invalid flashcards
