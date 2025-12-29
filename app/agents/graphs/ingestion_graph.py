@@ -386,8 +386,6 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
         pref_service = UserPreferenceService(db)
         preferences = await pref_service.get_preferences(user_id=input_data.user_id)
         
-        logger.info(f"Flashcard generation check - auto_flashcards_after_ingest: {preferences.auto_flashcards_after_ingest}, document_id: {input_data.document_id}")
-        
         if preferences.auto_flashcards_after_ingest:
             await _log_step(state, "flashcards", "started")
             # Use FlashcardAgent for consistency with other LLM operations
@@ -406,9 +404,7 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
             )
             # Run without logging (already logged in ingestion graph)
             try:
-                logger.info(f"Starting flashcard generation for document {input_data.document_id} with mode {flashcard_mode}")
                 flashcard_output = await flashcard_agent.run_without_logging(flashcard_input)
-                logger.info(f"Flashcard agent returned: flashcards_created={flashcard_output.flashcards_created if flashcard_output else 0}, reason={flashcard_output.reason if flashcard_output else 'None'}")
                 
                 # Verify flashcards were actually created
                 if not flashcard_output:
@@ -426,7 +422,6 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
                 )
                 result = await db.execute(stmt)
                 flashcards_in_db = result.scalars().all()
-                logger.info(f"Found {len(flashcards_in_db)} flashcards in database for document {input_data.document_id}, workspace {input_data.workspace_id}")
                 
                 if flashcard_output.flashcards_created > 0:
                     if len(flashcards_in_db) > 0:
@@ -474,7 +469,6 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
                 # Re-raise to be caught by outer try/except
                 raise
         else:
-            logger.info(f"Flashcard generation skipped - auto_flashcards_after_ingest is false for user {input_data.user_id}")
             await _log_step(
                 state,
                 "flashcards",

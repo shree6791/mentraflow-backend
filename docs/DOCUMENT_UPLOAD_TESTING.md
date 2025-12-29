@@ -70,7 +70,7 @@ curl -X POST "http://localhost:8000/api/v1/workspaces?owner_username=testuser" \
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "name": "Test Workspace",
   "plan_tier": "free",
-  "owner_id": "550e8400-e29b-41d4-a716-446655440001",
+  "user_id": "550e8400-e29b-41d4-a716-446655440001",
   "created_at": "2024-01-01T00:00:00Z"
 }
 ```
@@ -146,7 +146,7 @@ curl -X POST "http://localhost:8000/api/v1/documents" \
 - The endpoint automatically extracts text from PDF, DOC, DOCX files
 - Text files are read directly
 - If `auto_ingest_on_upload=true` in user preferences (default: `true`), ingestion will start automatically in the background
-- During ingestion, summary and flashcards are also generated automatically if preferences are enabled (default: `true`)
+- During ingestion, summary, flashcards, and knowledge graph extraction are also generated automatically if preferences are enabled (default: `true` for all)
 
 ---
 
@@ -237,7 +237,7 @@ echo "✅ Document created: ${DOCUMENT_ID}"
 # Step 4: Check Document Status
 echo ""
 echo "Step 4: Checking document status..."
-echo "Note: Ingestion, summary, and flashcards happen automatically if preferences are enabled (default: true)"
+echo "Note: Ingestion, summary, flashcards, and knowledge graph extraction happen automatically if preferences are enabled (default: true)"
 sleep 5  # Wait a bit for processing to start
 STATUS_RESPONSE=$(curl -s "${BASE_URL}/api/v1/documents/${DOCUMENT_ID}")
 echo "✅ Document status:"
@@ -249,6 +249,8 @@ echo "📊 Summary:"
 echo "   - Workspace: ${WORKSPACE_ID}"
 echo "   - Document: ${DOCUMENT_ID}"
 echo "   - Check document: ${BASE_URL}/api/v1/documents/${DOCUMENT_ID}"
+echo "   - View flashcards: ${BASE_URL}/api/v1/flashcards?document_id=${DOCUMENT_ID}"
+echo "   - View KG concepts: ${BASE_URL}/api/v1/kg/concepts?workspace_id=${WORKSPACE_ID}"
 ```
 
 **Make it executable:**
@@ -308,11 +310,17 @@ When you upload a document with default preferences:
    - Stored in `documents.summary_text` column
 
 3. **Flashcard Generation** (if `auto_flashcards_after_ingest=true` - default: `true`):
-   - Flashcards are generated using LLM
+   - Flashcards are generated using LLM (default mode: `mcq`)
    - Stored in `flashcards` table
-   - Uses `default_flashcard_mode` from preferences (default: `qa`)
+   - Uses `default_flashcard_mode` from preferences (default: `mcq`)
 
-All of these run asynchronously in the background. Check the document status or agent run status to monitor progress.
+4. **Knowledge Graph Extraction** (if `auto_kg_after_ingest=true` - default: `true`):
+   - Concepts and relationships are extracted using LLM
+   - Concepts stored in `concepts` table and Qdrant (`mentraflow_concepts` collection)
+   - Relationships stored as edges in `kg_edges` table
+   - Automatically finds relations to existing concepts from other documents
+
+All of these run asynchronously in parallel in the background. Check the document status or agent run status to monitor progress.
 
 ---
 
@@ -320,8 +328,10 @@ All of these run asynchronously in the background. Check the document status or 
 
 After successful upload and processing:
 - ✅ Test chat functionality: `POST /api/v1/chat`
-- ✅ View summary: `GET /api/v1/documents/{document_id}/summary`
+- ✅ View summary: `GET /api/v1/documents/{document_id}` (check `summary_text` field)
 - ✅ View flashcards: `GET /api/v1/flashcards?document_id={document_id}`
+- ✅ View knowledge graph concepts: `GET /api/v1/kg/concepts?workspace_id={workspace_id}`
+- ✅ View knowledge graph edges: `GET /api/v1/kg/edges?workspace_id={workspace_id}`
 - ✅ Test semantic search: `POST /api/v1/search`
 
 See `API_ROUTES.md` for detailed endpoint documentation.
