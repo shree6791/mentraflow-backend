@@ -29,9 +29,11 @@ FastAPI backend application for MentraFlow.
 
 All documentation is available in the [`docs/`](./docs/) directory:
 
-- **[Main Documentation](./docs/README.md)** - Setup and project structure
+- **[API Routes](./docs/API_ROUTES.md)** - Complete API endpoint reference
+- **[Document Upload Testing](./docs/DOCUMENT_UPLOAD_TESTING.md)** - Guide for testing document upload flow
+- **[Knowledge Graph Testing](./docs/KNOWLEDGE_GRAPH_TESTING.md)** - Guide for testing knowledge graph extraction and exploration
+- **[Agents Documentation](./docs/AGENTS.md)** - Agent architecture and implementation details
 - **[OpenAI Setup Guide](./docs/OPENAI_SETUP_GUIDE.md)** - OpenAI API key and model configuration
-- **[Agent Architecture](./docs/agents/)** - Agent system documentation
 - **[Alembic Migrations](./docs/alembic/README.md)** - Database migration guide
 
 ## Available Make Targets

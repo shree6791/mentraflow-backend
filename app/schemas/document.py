@@ -23,7 +23,7 @@ class DocumentRead(BaseModel):
 
     id: uuid.UUID = Field(description="Document ID")
     workspace_id: uuid.UUID = Field(description="Workspace ID")
-    created_by: uuid.UUID | None = Field(default=None, description="Creator user ID (nullable if user deleted)")
+    user_id: uuid.UUID | None = Field(default=None, description="User ID who created the document (nullable if user deleted)")
     title: str | None = Field(default=None, description="Document title")
     doc_type: str | None = Field(default=None, description="Document type")
     source_url: str | None = Field(default=None, description="Source URL")

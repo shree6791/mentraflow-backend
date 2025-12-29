@@ -35,6 +35,57 @@ def get_qdrant_client() -> QdrantClient:
     )
 
 
+async def drop_collections() -> None:
+    """Drop both Qdrant collections (use with caution - deletes all data!).
+    
+    This will delete all vectors and data in both collections.
+    """
+    import asyncio
+    
+    client = get_qdrant_client()
+    
+    # Check existing collections
+    try:
+        collections_result = await asyncio.wait_for(
+            asyncio.to_thread(client.get_collections),
+            timeout=10.0
+        )
+        existing_collections = {c.name for c in collections_result.collections}
+    except asyncio.TimeoutError:
+        logger.error("❌ Timeout checking Qdrant collections (server may be unreachable)")
+        raise
+    
+    # Drop chunks collection if it exists
+    if CHUNKS_COLLECTION in existing_collections:
+        logger.warning(f"🗑️  Dropping collection: {CHUNKS_COLLECTION}")
+        try:
+            await asyncio.to_thread(
+                client.delete_collection,
+                collection_name=CHUNKS_COLLECTION,
+            )
+            logger.info(f"✅ Dropped collection: {CHUNKS_COLLECTION}")
+        except Exception as e:
+            logger.error(f"❌ Failed to drop collection {CHUNKS_COLLECTION}: {str(e)}")
+            raise
+    else:
+        logger.info(f"ℹ️  Collection does not exist: {CHUNKS_COLLECTION}")
+    
+    # Drop concepts collection if it exists
+    if CONCEPTS_COLLECTION in existing_collections:
+        logger.warning(f"🗑️  Dropping collection: {CONCEPTS_COLLECTION}")
+        try:
+            await asyncio.to_thread(
+                client.delete_collection,
+                collection_name=CONCEPTS_COLLECTION,
+            )
+            logger.info(f"✅ Dropped collection: {CONCEPTS_COLLECTION}")
+        except Exception as e:
+            logger.error(f"❌ Failed to drop collection {CONCEPTS_COLLECTION}: {str(e)}")
+            raise
+    else:
+        logger.info(f"ℹ️  Collection does not exist: {CONCEPTS_COLLECTION}")
+
+
 async def ensure_collections_exist() -> None:
     """Ensure both Qdrant collections exist with proper configuration.
     

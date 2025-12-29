@@ -81,9 +81,11 @@ def build_study_chat_graph(service_tools: Any, llm: Any, system_prompt: str) -> 
     workflow.add_node("build_output", _build_output)
     workflow.add_node("handle_error", _handle_error)
 
-    # Define edges
+    # Define workflow edges (linear flow with error handling)
     workflow.set_entry_point("reformulate_query")
     workflow.add_edge("reformulate_query", "search_chunks")
+    
+    # Search chunks - can handle empty gracefully, or continue/error
     workflow.add_conditional_edges(
         "search_chunks",
         _should_continue_after_search,
@@ -93,14 +95,18 @@ def build_study_chat_graph(service_tools: Any, llm: Any, system_prompt: str) -> 
             "error": "handle_error",
         },
     )
+    
+    # Generate answer - continue or error
     workflow.add_conditional_edges(
         "generate_answer",
-        _should_continue_after_generate,
+        _should_continue,
         {
             "continue": "validate_citations",
             "error": "handle_error",
         },
     )
+    
+    # Validate citations and build output (sequential)
     workflow.add_edge("validate_citations", "build_output")
     workflow.add_edge("build_output", END)
     workflow.add_edge("handle_error", END)
@@ -233,8 +239,8 @@ async def _search_chunks(state: StudyChatState) -> StudyChatState:
 
 
 def _should_continue_after_search(state: StudyChatState) -> Literal["continue", "empty", "error"]:
-    """Check if we should continue after search."""
-    if state.get("error") or state["status"] == "failed":
+    """Check if we should continue after search (handles empty case)."""
+    if state.get("error") or state.get("status") == "failed":
         return "error"
     if not state.get("search_results"):
         return "empty"
@@ -317,9 +323,9 @@ Provide:
         }
 
 
-def _should_continue_after_generate(state: StudyChatState) -> Literal["continue", "error"]:
-    """Check if we should continue after generation."""
-    if state.get("error") or state["status"] == "failed":
+def _should_continue(state: StudyChatState) -> Literal["continue", "error"]:
+    """Check if we should continue to next step or handle error."""
+    if state.get("error") or state.get("status") == "failed":
         return "error"
     return "continue"
 

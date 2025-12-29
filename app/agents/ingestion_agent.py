@@ -1,5 +1,4 @@
 """Ingestion agent for processing documents using LangGraph."""
-import uuid
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,7 +45,6 @@ class IngestionAgent(BaseAgent[IngestionAgentInput, IngestionAgentOutput]):
     async def _run_internal(self) -> IngestionAgentOutput:
         """Internal run method using LangGraph."""
         input_data = self._current_input
-        run_id = getattr(self, "_current_run_id", None)
 
         # Initialize state (includes service_tools and db for graph nodes)
         from app.agents.graphs.ingestion_graph import IngestionState
@@ -60,16 +58,16 @@ class IngestionAgent(BaseAgent[IngestionAgentInput, IngestionAgentOutput]):
             "status": "pending",
             "service_tools": self.service_tools,
             "db": self.db,
-            "run_id": run_id,  # Pass run_id for step logging
+            "run_id": self._get_run_id(),  # Pass run_id for step logging
         }
 
         # Run graph
         final_state = await self.graph.ainvoke(initial_state)
 
-        # Check for errors
-        if final_state.get("error") or final_state["status"] == "failed":
-            # Update document status to failed (defense-in-depth - _handle_error should have done this)
+        # Check for errors and update document status if needed
+        if final_state.get("error") or final_state.get("status") == "failed":
             error_message = final_state.get("error", "Ingestion failed")
+            # Update document status to failed (defense-in-depth)
             try:
                 from app.services.document_service import DocumentService
                 doc_service = DocumentService(self.db)
@@ -85,11 +83,11 @@ class IngestionAgent(BaseAgent[IngestionAgentInput, IngestionAgentOutput]):
             
             raise ValueError(error_message)
 
-        # Return output with run_id
+        # Return output (run_id will be set by BaseAgent._execute_with_logging)
         return IngestionAgentOutput(
             document_id=final_state["document_id"],
             chunks_created=len(final_state["chunks"]),
             embeddings_created=len(final_state["embeddings"]),
             status="ready",  # Use "ready" to match document status after ingestion
-            run_id=run_id,
+            run_id=self._get_run_id(),
         )

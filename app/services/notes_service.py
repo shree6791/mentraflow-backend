@@ -2,19 +2,19 @@
 import uuid
 from typing import Any
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.note import Note
+from app.services.base import BaseService
 
 
-class NotesService:
+class NotesService(BaseService):
     """Service for note operations."""
 
     def __init__(self, db: AsyncSession):
         """Initialize service with database session."""
-        self.db = db
+        super().__init__(db)
 
     async def create_note(
         self,
@@ -27,23 +27,18 @@ class NotesService:
         metadata: dict[str, Any] | None = None,
     ) -> Note:
         """Create a new note."""
-        try:
-            note = Note(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                document_id=source_document_id,
-                note_type=note_type,
-                title=title,
-                body=content,
-                meta_data=metadata,
-            )
-            self.db.add(note)
-            await self.db.commit()
-            await self.db.refresh(note)
-            return note
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while creating note: {str(e)}") from e
+        note = Note(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            document_id=source_document_id,
+            note_type=note_type,
+            title=title,
+            body=content,
+            meta_data=metadata,
+        )
+        self.db.add(note)
+        await self._commit_and_refresh(note)
+        return note
 
     async def list_notes(
         self, workspace_id: uuid.UUID, user_id: uuid.UUID | None = None

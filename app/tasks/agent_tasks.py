@@ -30,21 +30,28 @@ async def execute_agent_async(
     """
     agent_run_service = AgentRunService(db)
 
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
         # Update status to running
         await agent_run_service.update_status(run_id, "running")
 
         # Execute agent with skip_logging=True to avoid duplicate run creation
-        # All router methods now accept skip_logging parameter
         result = await agent_method(input_data, skip_logging=True)
 
         # Update status to succeeded
-        output_json = result.model_dump() if hasattr(result, "model_dump") else {}
+        # Use mode='json' to convert UUIDs and other non-JSON types to strings
+        if hasattr(result, "model_dump"):
+            output_json = result.model_dump(mode='json')
+        else:
+            output_json = {}
         await agent_run_service.update_status(
             run_id, "succeeded", output_json=output_json
         )
     except Exception as e:
         # Update status to failed
+        logger.error(f"{agent_name} agent failed for run {run_id}: {str(e)}", exc_info=True)
         await agent_run_service.update_status(
             run_id, "failed", error=str(e)
         )

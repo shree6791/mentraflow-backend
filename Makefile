@@ -1,4 +1,4 @@
-.PHONY: run format lint test migrate makemigration install help routes devflow run-debug
+.PHONY: run format lint test migrate makemigration install help routes devflow run-debug qdrant-start qdrant-stop qdrant-status
 
 help:
 	@echo "Available targets:"
@@ -12,6 +12,9 @@ help:
 	@echo "  makemigration - Create a new database migration"
 	@echo "  routes        - Audit routes against contract"
 	@echo "  devflow       - Run end-to-end development flow"
+	@echo "  qdrant-start  - Start Qdrant vector database (Docker)"
+	@echo "  qdrant-stop   - Stop Qdrant vector database"
+	@echo "  qdrant-status - Check if Qdrant is running"
 
 install:
 	pip install -r requirements.txt
@@ -76,4 +79,32 @@ devflow:
 	@echo "Running end-to-end development flow..."
 	@echo "Make sure the server is running: make run"
 	@python3 app/scripts/devflow_runner.py
+
+# Qdrant Docker commands
+qdrant-start:
+	@echo "Starting Qdrant vector database..."
+	@docker run -d \
+		--name qdrant \
+		-p 6333:6333 \
+		-p 6334:6334 \
+		-v $$(pwd)/qdrant_storage:/qdrant/storage \
+		qdrant/qdrant:latest || \
+		(docker start qdrant && echo "Qdrant container already exists, started existing container")
+	@echo "✅ Qdrant started on http://localhost:6333"
+	@echo "   Dashboard: http://localhost:6333/dashboard"
+
+qdrant-stop:
+	@echo "Stopping Qdrant..."
+	@docker stop qdrant 2>/dev/null || echo "Qdrant container not running"
+	@echo "✅ Qdrant stopped"
+
+qdrant-status:
+	@echo "Checking Qdrant status..."
+	@if docker ps | grep -q qdrant; then \
+		echo "✅ Qdrant is running"; \
+		curl -s http://localhost:6333/health | python3 -m json.tool 2>/dev/null || echo "   (Health check failed)"; \
+	else \
+		echo "❌ Qdrant is not running"; \
+		echo "   Run 'make qdrant-start' to start it"; \
+	fi
 

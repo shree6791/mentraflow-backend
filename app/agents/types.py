@@ -4,6 +4,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.core.constants import (
+    DEFAULT_FLASHCARD_MODE,
+    DEFAULT_SUMMARY_MAX_BULLETS,
+    SUMMARY_MAX_BULLETS_MAX,
+    SUMMARY_MAX_BULLETS_MIN,
+)
+
 
 # IngestionAgent
 class IngestionAgentInput(BaseModel):
@@ -72,7 +79,10 @@ class FlashcardAgentInput(BaseModel):
     workspace_id: uuid.UUID = Field(description="Workspace ID")
     user_id: uuid.UUID = Field(description="User ID")
     source_document_id: uuid.UUID = Field(description="Source document ID")
-    mode: str = Field(default="key_terms", description="Generation mode: key_terms, qa, or cloze")
+    mode: str = Field(
+        default="key_terms",
+        description="Generation mode: key_terms, qa, or cloze"
+    )
 
 
 class FlashcardPreview(BaseModel):
@@ -153,7 +163,12 @@ class SummaryAgentInput(BaseModel):
     document_id: uuid.UUID = Field(description="Document ID to summarize")
     workspace_id: uuid.UUID = Field(description="Workspace ID")
     user_id: uuid.UUID = Field(description="User ID")
-    max_bullets: int = Field(default=7, ge=1, le=20, description="Maximum number of bullet points in summary (default: 7)")
+    max_bullets: int = Field(
+        default=DEFAULT_SUMMARY_MAX_BULLETS,
+        ge=SUMMARY_MAX_BULLETS_MIN,
+        le=SUMMARY_MAX_BULLETS_MAX,
+        description=f"Maximum number of bullet points in summary (default: {DEFAULT_SUMMARY_MAX_BULLETS})"
+    )
 
 
 class SummaryAgentOutput(BaseModel):

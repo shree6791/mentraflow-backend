@@ -3,19 +3,19 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_run import AgentRun
+from app.services.base import BaseService
 
 
-class AgentRunService:
+class AgentRunService(BaseService):
     """Service for agent run operations."""
 
     def __init__(self, db: AsyncSession):
         """Initialize service with database session."""
-        self.db = db
+        super().__init__(db)
 
     async def create_run(
         self,
@@ -34,21 +34,16 @@ class AgentRunService:
             input_json: Input data as JSON
             status: Initial status (default: "queued")
         """
-        try:
-            agent_run = AgentRun(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                agent_name=agent_name,
-                status=status,
-                input=input_json,
-            )
-            self.db.add(agent_run)
-            await self.db.commit()
-            await self.db.refresh(agent_run)
-            return agent_run
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while creating agent run: {str(e)}") from e
+        agent_run = AgentRun(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            agent_name=agent_name,
+            status=status,
+            input=input_json,
+        )
+        self.db.add(agent_run)
+        await self._commit_and_refresh(agent_run)
+        return agent_run
 
     async def update_status(
         self,
@@ -73,30 +68,25 @@ class AgentRunService:
         if not agent_run:
             raise ValueError(f"Agent run {run_id} not found")
 
-        try:
-            if status is not None:
-                agent_run.status = status
-            if output_json is not None:
-                agent_run.output = output_json
-            if error is not None:
-                agent_run.error = error
-            
-            # Append step log if provided
-            if step is not None:
-                if agent_run.steps is None:
-                    agent_run.steps = []
-                step["timestamp"] = datetime.now(timezone.utc).isoformat()
-                agent_run.steps.append(step)
+        if status is not None:
+            agent_run.status = status
+        if output_json is not None:
+            agent_run.output = output_json
+        if error is not None:
+            agent_run.error = error
+        
+        # Append step log if provided
+        if step is not None:
+            if agent_run.steps is None:
+                agent_run.steps = []
+            step["timestamp"] = datetime.now(timezone.utc).isoformat()
+            agent_run.steps.append(step)
 
-            if status and status in ("succeeded", "failed", "completed"):
-                agent_run.finished_at = datetime.now(timezone.utc)
+        if status and status in ("succeeded", "failed", "completed"):
+            agent_run.finished_at = datetime.now(timezone.utc)
 
-            await self.db.commit()
-            await self.db.refresh(agent_run)
-            return agent_run
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while updating agent run status: {str(e)}") from e
+        await self._commit_and_refresh(agent_run)
+        return agent_run
 
     async def complete_run(
         self,

@@ -48,7 +48,7 @@ class AgentRouter:
                 db, graph_registry=self.graph_registry, service_tools=self.service_tools
             ),
             "study_chat": StudyChatAgent(
-                db, graph_registry=self.graph_registry
+                db, graph_registry=self.graph_registry, service_tools=self.service_tools
             ),
             "flashcard": FlashcardAgent(
                 db, graph_registry=self.graph_registry, service_tools=self.service_tools

@@ -133,6 +133,26 @@ class BaseAgent(ABC, Generic[InputModel, OutputModel]):
             error=error,
         )
 
+    def _get_run_id(self) -> uuid.UUID | None:
+        """Get current run ID if available."""
+        return getattr(self, "_current_run_id", None)
+
+    def _check_and_raise_error(
+        self, final_state: dict[str, Any], default_error: str = "Agent execution failed"
+    ) -> None:
+        """Check final state for errors and raise if found.
+        
+        Args:
+            final_state: Final state dictionary from graph execution
+            default_error: Default error message if error not found in state
+            
+        Raises:
+            ValueError: If error is found in final state
+        """
+        if final_state.get("error") or final_state.get("status") == "failed":
+            error_message = final_state.get("error", default_error)
+            raise ValueError(error_message)
+
     async def _execute_with_logging(
         self,
         workspace_id: uuid.UUID,

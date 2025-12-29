@@ -121,6 +121,9 @@ class Settings(BaseSettings):
     DROP_AND_RECREATE_TABLES: bool = Field(
         default=False, description="⚠️  DANGEROUS: Drop all tables and recreate (DELETES ALL DATA! Dev only!)"
     )
+    DROP_AND_RECREATE_COLLECTIONS: bool = Field(
+        default=False, description="⚠️  DANGEROUS: Drop all Qdrant collections and recreate (DELETES ALL VECTOR DATA! Dev only!)"
+    )
     DEBUG: bool = Field(default=False, description="Enable debug mode (verbose logging, FastAPI debug features)")
 
     # ============================================================================
@@ -168,7 +171,7 @@ class Settings(BaseSettings):
         except (ValueError, TypeError):
             return 8000
 
-    @field_validator("AUTO_CREATE_TABLES", "DROP_AND_RECREATE_TABLES", "DEBUG", mode="before")
+    @field_validator("AUTO_CREATE_TABLES", "DROP_AND_RECREATE_TABLES", "DROP_AND_RECREATE_COLLECTIONS", "DEBUG", mode="before")
     @classmethod
     def parse_bool(cls, v: Any) -> bool:
         """Parse boolean values, stripping comments and converting string to bool."""

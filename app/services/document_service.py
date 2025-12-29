@@ -3,19 +3,19 @@ import hashlib
 import uuid
 from typing import Any
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Document
+from app.services.base import BaseService
 
 
-class DocumentService:
+class DocumentService(BaseService):
     """Service for document operations."""
 
     def __init__(self, db: AsyncSession):
         """Initialize service with database session."""
-        self.db = db
+        super().__init__(db)
 
     async def create_document(
         self,
@@ -58,44 +58,32 @@ class DocumentService:
                     # Return existing document instead of creating duplicate
                     return existing
         
-        try:
-            document = Document(
-                workspace_id=workspace_id,
-                created_by=user_id,
-                title=title,
-                doc_type=source_type,
-                source_url=source_uri,
-                meta_data=metadata,
-                status="pending",
-                content_hash=content_hash,
-            )
-            self.db.add(document)
-            await self.db.commit()
-            await self.db.refresh(document)
-            return document
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while creating document: {str(e)}") from e
+        document = Document(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            title=title,
+            doc_type=source_type,
+            source_url=source_uri,
+            meta_data=metadata,
+            status="pending",
+            content_hash=content_hash,
+        )
+        self.db.add(document)
+        await self._commit_and_refresh(document)
+        return document
 
     async def store_raw_text(self, document_id: uuid.UUID, raw_text: str) -> Document:
         """Store raw text content in a document and compute content hash."""
-        try:
-            stmt = select(Document).where(Document.id == document_id)
-            result = await self.db.execute(stmt)
-            document = result.scalar_one_or_none()
-            if not document:
-                raise ValueError(f"Document {document_id} not found")
+        document = await self.get_document(document_id)
+        if not document:
+            raise ValueError(f"Document {document_id} not found")
 
-            document.content = raw_text
-            # Compute content hash for deduplication
-            document.content_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
-            document.status = "processed"
-            await self.db.commit()
-            await self.db.refresh(document)
-            return document
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while storing raw text: {str(e)}") from e
+        document.content = raw_text
+        # Compute content hash for deduplication
+        document.content_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+        document.status = "processed"
+        await self._commit_and_refresh(document)
+        return document
 
     async def list_documents(self, workspace_id: uuid.UUID) -> list[Document]:
         """List all documents in a workspace."""
@@ -125,28 +113,23 @@ class DocumentService:
         if not document:
             raise ValueError(f"Document {document_id} not found")
         
-        try:
-            if title is not None:
-                document.title = title
-            if doc_type is not None:
-                document.doc_type = doc_type
-            if source_url is not None:
-                document.source_url = source_url
-            if language is not None:
-                document.language = language
-            if status is not None:
-                document.status = status
-            if summary_text is not None:
-                document.summary_text = summary_text
-            if metadata is not None:
-                document.meta_data = metadata
-            
-            await self.db.commit()
-            await self.db.refresh(document)
-            return document
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while updating document: {str(e)}") from e
+        if title is not None:
+            document.title = title
+        if doc_type is not None:
+            document.doc_type = doc_type
+        if source_url is not None:
+            document.source_url = source_url
+        if language is not None:
+            document.language = language
+        if status is not None:
+            document.status = status
+        if summary_text is not None:
+            document.summary_text = summary_text
+        if metadata is not None:
+            document.meta_data = metadata
+        
+        await self._commit_and_refresh(document)
+        return document
 
     async def delete_document(self, document_id: uuid.UUID) -> None:
         """Delete a document (cascade deletes chunks, embeddings, etc.)."""
@@ -154,12 +137,8 @@ class DocumentService:
         if not document:
             raise ValueError(f"Document {document_id} not found")
         
-        try:
-            await self.db.delete(document)
-            await self.db.commit()
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while deleting document: {str(e)}") from e
+        await self.db.delete(document)
+        await self.db.commit()
 
     async def find_duplicate_by_hash(
         self, workspace_id: uuid.UUID, content_hash: str

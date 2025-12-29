@@ -13,16 +13,20 @@ class StudyChatAgent(BaseAgent[StudyChatAgentInput, StudyChatAgentOutput]):
     """Agent for answering study questions with citations using LangGraph."""
 
     def __init__(
-        self, db: AsyncSession, graph_registry: GraphRegistry | None = None
+        self,
+        db: AsyncSession,
+        graph_registry: GraphRegistry | None = None,
+        service_tools: ServiceTools | None = None,
     ):
         """Initialize study chat agent.
         
         Args:
             db: Database session
             graph_registry: Optional shared GraphRegistry (uses singleton if not provided)
+            service_tools: Optional ServiceTools instance (creates new one if not provided)
         """
         super().__init__(db, agent_name="study_chat", graph_registry=graph_registry)
-        self.service_tools = ServiceTools(db)
+        self.service_tools = service_tools or ServiceTools(db)
         # Use shared graph registry (singleton)
         self.graph_registry = graph_registry or GraphRegistry()
         # Get graph - graphs are stateless, service_tools/db passed in state
@@ -71,12 +75,8 @@ class StudyChatAgent(BaseAgent[StudyChatAgentInput, StudyChatAgentOutput]):
         # Run graph
         final_state = await self.graph.ainvoke(initial_state)
 
-        # Check for errors
-        if final_state.get("error") or final_state["status"] == "failed":
-            # Error handling is done in the graph, but we can add additional logging here
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Study chat failed: {final_state.get('error', 'Unknown error')}")
+        # Note: Study chat handles errors gracefully in the graph (returns user-friendly messages)
+        # We don't raise here because the graph already provides error responses in the answer field
 
         # Return output from final state
         return StudyChatAgentOutput(

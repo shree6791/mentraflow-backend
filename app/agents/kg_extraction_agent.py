@@ -84,8 +84,7 @@ class KGExtractionAgent(BaseAgent[KGExtractionAgentInput, KGExtractionAgentOutpu
             )
 
         # Check for errors
-        if final_state.get("error") or final_state["status"] == "failed":
-            raise ValueError(final_state.get("error", "KG extraction failed"))
+        self._check_and_raise_error(final_state, "KG extraction failed")
 
         # Return output
         return KGExtractionAgentOutput(

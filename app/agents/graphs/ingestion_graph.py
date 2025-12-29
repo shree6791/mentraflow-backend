@@ -43,44 +43,45 @@ def build_ingestion_graph(service_tools: Any, db: Any) -> StateGraph:
     workflow.add_node("chunk_document", _chunk_document)
     workflow.add_node("embed_chunks", _embed_chunks)
     workflow.add_node("generate_summary", _generate_summary)  # Optional: generate summary after ingest
+    workflow.add_node("generate_flashcards", _generate_flashcards)  # Optional: generate flashcards after ingest
     workflow.add_node("update_status", _update_status)
     workflow.add_node("handle_error", _handle_error)
 
-    # Define edges
+    # Define workflow edges (linear flow with error handling)
     workflow.set_entry_point("validate_document")
     workflow.add_edge("validate_document", "store_raw_text")
+    
+    # Each step can either continue or go to error handler
     workflow.add_conditional_edges(
         "store_raw_text",
-        _should_continue_after_store,
-        {
-            "continue": "chunk_document",
-            "error": "handle_error",
-        },
+        _should_continue,
+        {"continue": "chunk_document", "error": "handle_error"},
     )
     workflow.add_conditional_edges(
         "chunk_document",
-        _should_continue_after_chunk,
-        {
-            "continue": "embed_chunks",
-            "error": "handle_error",
-        },
+        _should_continue,
+        {"continue": "embed_chunks", "error": "handle_error"},
     )
     workflow.add_conditional_edges(
         "embed_chunks",
-        _should_continue_after_embed,
-        {
-            "continue": "generate_summary",
-            "error": "handle_error",
-        },
+        _should_continue,
+        {"continue": "generate_summary", "error": "handle_error"},
     )
+    
+    # Summary is optional - always continue even on failure
     workflow.add_conditional_edges(
         "generate_summary",
         _should_continue_after_summary,
-        {
-            "continue": "update_status",
-            "error": "update_status",  # Continue even if summary fails
-        },
+        {"continue": "generate_flashcards", "error": "generate_flashcards"},
     )
+    
+    # Flashcards are optional - always continue even on failure
+    workflow.add_conditional_edges(
+        "generate_flashcards",
+        _should_continue_after_summary,  # Reuse same logic - always continue
+        {"continue": "update_status", "error": "update_status"},
+    )
+    
     workflow.add_edge("update_status", END)
     workflow.add_edge("handle_error", END)
 
@@ -119,6 +120,37 @@ async def _log_step(
         )
     except Exception as e:
         logger.warning(f"Failed to log step {step_name}: {str(e)}")
+
+
+async def _execute_step(
+    state: IngestionState,
+    step_name: str,
+    operation: Any,
+    on_success: Any,
+    get_details: Any | None = None,
+) -> IngestionState:
+    """Execute a step with standardized error handling and logging.
+    
+    Args:
+        state: Current ingestion state
+        step_name: Name of the step for logging
+        operation: Async callable that performs the operation
+        on_success: Callable that takes result and returns updated state
+        get_details: Optional callable to extract details from result for logging
+        
+    Returns:
+        Updated state (with error set if operation failed)
+    """
+    await _log_step(state, step_name, "started")
+    
+    try:
+        result = await operation()
+        details = get_details(result) if get_details else None
+        await _log_step(state, step_name, "completed", details=details)
+        return on_success(result)
+    except Exception as e:
+        await _log_step(state, step_name, "failed", error=str(e))
+        return {**state, "error": str(e), "status": "failed"}
 
 
 async def _validate_document(state: IngestionState) -> IngestionState:
@@ -204,56 +236,52 @@ async def _store_raw_text(state: IngestionState) -> IngestionState:
 
 async def _chunk_document(state: IngestionState) -> IngestionState:
     """Chunk the document."""
-    await _log_step(state, "chunk", "started")
-    
-    service_tools = state["service_tools"]
-    try:
-        chunks = await service_tools.chunking_service.chunk_document(
+    return await _execute_step(
+        state,
+        step_name="chunk",
+        operation=lambda: state["service_tools"].chunking_service.chunk_document(
             state["document_id"]
-        )
-        await _log_step(
-            state,
-            "chunk",
-            "completed",
-            details={"chunks_created": len(chunks)},
-        )
-        return {**state, "chunks": chunks, "status": "chunking"}
-    except Exception as e:
-        await _log_step(state, "chunk", "failed", error=str(e))
-        return {**state, "error": str(e), "status": "failed"}
+        ),
+        on_success=lambda chunks: {
+            **state,
+            "chunks": chunks,
+            "status": "chunking",
+        },
+        get_details=lambda chunks: {"chunks_created": len(chunks)},
+    )
 
 
 async def _embed_chunks(state: IngestionState) -> IngestionState:
     """Embed the chunks and upsert to Qdrant."""
-    await _log_step(state, "embed", "started")
-    
-    service_tools = state["service_tools"]
-    try:
-        embeddings = await service_tools.embedding_service.embed_chunks(
+    result = await _execute_step(
+        state,
+        step_name="embed",
+        operation=lambda: state["service_tools"].embedding_service.embed_chunks(
             state["document_id"]
-        )
+        ),
+        on_success=lambda embeddings: {
+            **state,
+            "embeddings": embeddings,
+            "status": "embedding",
+        },
+        get_details=lambda embeddings: {"embeddings_created": len(embeddings)},
+    )
+    
+    # Log Qdrant upsert (happens inside embed_chunks)
+    if not result.get("error") and result.get("embeddings"):
+        embeddings = result["embeddings"]
+        await _log_step(state, "upsert", "started")
         await _log_step(
             state,
-            "embed",
+            "upsert",
             "completed",
-            details={"embeddings_created": len(embeddings)},
+            details={
+                "points_upserted": len(embeddings),
+                "collection": "mentraflow_chunks",
+            },
         )
-        
-        # Log Qdrant upsert step (upsert happens inside embed_chunks)
-        if embeddings:
-            await _log_step(state, "upsert", "started")
-            # Note: upsert happens inside embed_chunks, so we log it here
-            await _log_step(
-                state,
-                "upsert",
-                "completed",
-                details={"points_upserted": len(embeddings), "collection": "mentraflow_chunks"},
-            )
-        
-        return {**state, "embeddings": embeddings, "status": "embedding"}
-    except Exception as e:
-        await _log_step(state, "embed", "failed", error=str(e))
-        return {**state, "error": str(e), "status": "failed"}
+    
+    return result
 
 
 async def _generate_summary(state: IngestionState) -> IngestionState:
@@ -274,20 +302,51 @@ async def _generate_summary(state: IngestionState) -> IngestionState:
             from app.agents.types import SummaryAgentInput
             
             summary_agent = SummaryAgent(db)
+            from app.core.constants import DEFAULT_SUMMARY_MAX_BULLETS
             summary_input = SummaryAgentInput(
                 document_id=input_data.document_id,
                 workspace_id=input_data.workspace_id,
                 user_id=input_data.user_id,
-                max_bullets=7,
+                max_bullets=DEFAULT_SUMMARY_MAX_BULLETS,
             )
             # Run without logging (already logged in ingestion graph)
-            summary_output = await summary_agent.run_without_logging(summary_input)
-            await _log_step(
-                state,
-                "summary",
-                "completed",
-                details={"summary_length": summary_output.summary_length},
-            )
+            try:
+                summary_output = await summary_agent.run_without_logging(summary_input)
+                # Verify summary was actually generated
+                if not summary_output or not summary_output.summary:
+                    raise ValueError("Summary agent returned empty summary")
+                
+                # Verify summary was stored in database
+                from sqlalchemy import select
+                from app.models.document import Document
+                stmt = select(Document).where(Document.id == input_data.document_id)
+                result = await db.execute(stmt)
+                document = result.scalar_one_or_none()
+                if document and document.summary_text:
+                    await _log_step(
+                        state,
+                        "summary",
+                        "completed",
+                        details={
+                            "summary_length": summary_output.summary_length,
+                            "stored_in_db": True,
+                        },
+                    )
+                else:
+                    # Summary was generated but not stored - this shouldn't happen
+                    await _log_step(
+                        state,
+                        "summary",
+                        "warning",
+                        details={
+                            "summary_length": summary_output.summary_length,
+                            "stored_in_db": False,
+                            "warning": "Summary generated but not found in database",
+                        },
+                    )
+            except Exception as summary_error:
+                # Re-raise to be caught by outer try/except
+                raise
         else:
             await _log_step(
                 state,
@@ -298,7 +357,109 @@ async def _generate_summary(state: IngestionState) -> IngestionState:
     except Exception as e:
         # Log but don't fail - summary is optional
         await _log_step(state, "summary", "failed", error=str(e))
-        logger.warning(f"Summary generation failed for document {input_data.document_id}: {str(e)}")
+    
+    return state
+
+
+async def _generate_flashcards(state: IngestionState) -> IngestionState:
+    """Generate flashcards after ingestion (best effort - failures don't block)."""
+    input_data = state["input_data"]
+    db = state["db"]
+    
+    try:
+        # Check user preferences for auto_flashcards_after_ingest
+        from app.services.user_preference_service import UserPreferenceService
+        pref_service = UserPreferenceService(db)
+        preferences = await pref_service.get_preferences(user_id=input_data.user_id)
+        
+        if preferences.auto_flashcards_after_ingest:
+            await _log_step(state, "flashcards", "started")
+            # Use FlashcardAgent for consistency with other LLM operations
+            from app.agents.flashcard_agent import FlashcardAgent
+            from app.agents.types import FlashcardAgentInput
+            
+            flashcard_agent = FlashcardAgent(db)
+            # Use default_flashcard_mode from preferences, fallback to constant
+            from app.core.constants import DEFAULT_FLASHCARD_MODE
+            flashcard_mode = preferences.default_flashcard_mode or DEFAULT_FLASHCARD_MODE
+            flashcard_input = FlashcardAgentInput(
+                workspace_id=input_data.workspace_id,
+                user_id=input_data.user_id,
+                source_document_id=input_data.document_id,
+                mode=flashcard_mode,
+            )
+            # Run without logging (already logged in ingestion graph)
+            try:
+                flashcard_output = await flashcard_agent.run_without_logging(flashcard_input)
+                # Verify flashcards were actually created
+                if not flashcard_output:
+                    raise ValueError("Flashcard agent returned empty output")
+                
+                # Verify flashcards were stored in database
+                from sqlalchemy import select
+                from app.models.flashcard import Flashcard
+                stmt = select(Flashcard).where(
+                    Flashcard.document_id == input_data.document_id,
+                    Flashcard.workspace_id == input_data.workspace_id,
+                )
+                result = await db.execute(stmt)
+                flashcards_in_db = result.scalars().all()
+                
+                if flashcard_output.flashcards_created > 0:
+                    if len(flashcards_in_db) > 0:
+                        await _log_step(
+                            state,
+                            "flashcards",
+                            "completed",
+                            details={
+                                "flashcards_created": flashcard_output.flashcards_created,
+                                "flashcards_in_db": len(flashcards_in_db),
+                                "mode": flashcard_mode,
+                                "dropped_count": flashcard_output.dropped_count,
+                                "stored_in_db": True,
+                            },
+                        )
+                    else:
+                        # Flashcards were created but not found in database
+                        await _log_step(
+                            state,
+                            "flashcards",
+                            "warning",
+                            details={
+                                "flashcards_created": flashcard_output.flashcards_created,
+                                "flashcards_in_db": len(flashcards_in_db),
+                                "mode": flashcard_mode,
+                                "dropped_count": flashcard_output.dropped_count,
+                                "stored_in_db": False,
+                                "warning": "Flashcards generated but not found in database",
+                            },
+                        )
+                else:
+                    # No flashcards created (might be due to insufficient content or validation)
+                    await _log_step(
+                        state,
+                        "flashcards",
+                        "completed",
+                        details={
+                            "flashcards_created": 0,
+                            "reason": flashcard_output.reason or "unknown",
+                            "mode": flashcard_mode,
+                            "dropped_count": flashcard_output.dropped_count,
+                        },
+                    )
+            except Exception as flashcard_error:
+                # Re-raise to be caught by outer try/except
+                raise
+        else:
+            await _log_step(
+                state,
+                "flashcards",
+                "skipped",
+                details={"reason": "auto_flashcards_after_ingest is false"},
+            )
+    except Exception as e:
+        # Log but don't fail - flashcard generation is optional
+        await _log_step(state, "flashcards", "failed", error=str(e))
     
     return state
 
@@ -307,30 +468,33 @@ async def _update_status(state: IngestionState) -> IngestionState:
     """Update document status to ready."""
     await _log_step(state, "audit", "started")
     
-    document = state["document"]
     db = state["db"]
+    document_id = state["document_id"]
     
-    # Refresh document to get latest state
-    from sqlalchemy import select
-    from app.models.document import Document
-    stmt = select(Document).where(Document.id == state["document_id"])
-    result = await db.execute(stmt)
-    document = result.scalar_one_or_none()
-    
-    if document:
-        document.status = "ready"  # Use "ready" instead of "processed" per contract
-        await db.commit()
+    try:
+        from sqlalchemy import select
+        from app.models.document import Document
         
-        await _log_step(
-            state,
-            "audit",
-            "completed",
-            details={
-                "document_status": "ready",
-                "chunks_count": len(state.get("chunks", [])),
-                "embeddings_count": len(state.get("embeddings", [])),
-            },
-        )
+        stmt = select(Document).where(Document.id == document_id)
+        result = await db.execute(stmt)
+        document = result.scalar_one_or_none()
+        
+        if document:
+            document.status = "ready"
+            await db.commit()
+            
+            await _log_step(
+                state,
+                "audit",
+                "completed",
+                details={
+                    "document_status": "ready",
+                    "chunks_count": len(state.get("chunks", [])),
+                    "embeddings_count": len(state.get("embeddings", [])),
+                },
+            )
+    except Exception as e:
+        await _log_step(state, "audit", "failed", error=str(e))
     
     return {**state, "status": "completed"}
 
@@ -344,9 +508,9 @@ async def _handle_error(state: IngestionState) -> IngestionState:
     await _log_step(state, "error_handling", "started", error=error)
     
     try:
-        # Update document status to failed
         from sqlalchemy import select
         from app.models.document import Document
+        
         stmt = select(Document).where(Document.id == document_id)
         result = await db.execute(stmt)
         document = result.scalar_one_or_none()
@@ -374,23 +538,12 @@ async def _handle_error(state: IngestionState) -> IngestionState:
             "failed",
             error=f"Failed to update document status: {str(e)}",
         )
-        logger.error(f"Error updating document status to failed: {str(e)}", exc_info=True)
     
     return state
 
 
-def _should_continue_after_store(state: IngestionState) -> Literal["continue", "error"]:
-    """Check if we should continue after storing."""
-    return "error" if state.get("error") else "continue"
-
-
-def _should_continue_after_chunk(state: IngestionState) -> Literal["continue", "error"]:
-    """Check if we should continue after chunking."""
-    return "error" if state.get("error") else "continue"
-
-
-def _should_continue_after_embed(state: IngestionState) -> Literal["continue", "error"]:
-    """Check if we should continue after embedding."""
+def _should_continue(state: IngestionState) -> Literal["continue", "error"]:
+    """Check if we should continue to next step or handle error."""
     return "error" if state.get("error") else "continue"
 
 

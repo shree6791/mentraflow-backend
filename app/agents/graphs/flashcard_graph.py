@@ -63,8 +63,10 @@ def build_flashcard_graph(service_tools: Any, llm: Any, system_prompt: str) -> S
     workflow.add_node("build_preview", _build_preview)
     workflow.add_node("handle_error", _handle_error)
 
-    # Define edges
+    # Define workflow edges (linear flow with error handling)
     workflow.set_entry_point("retrieve_chunks")
+    
+    # Retrieve chunks - can return early if empty, or continue/error
     workflow.add_conditional_edges(
         "retrieve_chunks",
         _should_continue_after_retrieve,
@@ -74,14 +76,18 @@ def build_flashcard_graph(service_tools: Any, llm: Any, system_prompt: str) -> S
             "error": "handle_error",
         },
     )
+    
+    # Generate flashcards - continue or error
     workflow.add_conditional_edges(
         "generate_flashcards",
-        _should_continue_after_generate,
+        _should_continue,
         {
             "continue": "validate_cards",
             "error": "handle_error",
         },
     )
+    
+    # Validate cards - can return early if insufficient, or continue/error
     workflow.add_conditional_edges(
         "validate_cards",
         _should_continue_after_validate,
@@ -91,6 +97,8 @@ def build_flashcard_graph(service_tools: Any, llm: Any, system_prompt: str) -> S
             "error": "handle_error",
         },
     )
+    
+    # Create flashcards and build preview (sequential)
     workflow.add_edge("create_flashcards", "build_preview")
     workflow.add_edge("build_preview", END)
     workflow.add_edge("handle_error", END)
@@ -102,31 +110,58 @@ async def _retrieve_chunks(state: FlashcardState) -> FlashcardState:
     """Retrieve relevant chunks from document and check content quality."""
     input_data = state["input_data"]
     service_tools = state["service_tools"]
+    
     try:
-        search_results = await service_tools.retrieval_service.semantic_search(
-            input_data.workspace_id,
-            query="",  # Empty query to get all chunks from document
-            top_k=20,
-            filters={"document_id": str(input_data.source_document_id)},
-        )
+        # Use multiple semantic queries to get diverse chunks for flashcard generation
+        # This is better than empty query which might not work well
+        flashcard_queries = [
+            "key terms definitions important concepts",
+            "main ideas core principles",
+            "examples explanations details",
+        ]
         
-        # Check content quality (minimum content for good flashcards)
-        if search_results:
-            # Calculate total content length
-            total_content_length = sum(
-                len(result.get("content", "")) for result in search_results
+        all_retrieved_chunks = []
+        seen_chunk_ids = set()
+        
+        # Retrieve chunks using multiple semantic queries for diversity
+        for query in flashcard_queries:
+            search_results = await service_tools.retrieval_service.semantic_search(
+                input_data.workspace_id,
+                query=query,
+                top_k=7,  # Get top 7 for each query (total ~20 chunks)
+                filters={"document_id": str(input_data.source_document_id)},
             )
-            # Minimum threshold: ~200 words (approximately 1000 characters)
-            MIN_CONTENT_LENGTH = 1000
             
-            if total_content_length < MIN_CONTENT_LENGTH:
-                # Content is too short, but we'll still try to generate
-                # The validation step will filter out low-quality cards
-                pass
+            # Add unique chunks (avoid duplicates)
+            for result in search_results:
+                chunk_id = result.get("chunk_id")
+                if chunk_id and chunk_id not in seen_chunk_ids:
+                    all_retrieved_chunks.append(result)
+                    seen_chunk_ids.add(chunk_id)
+        
+        # If semantic retrieval didn't work (e.g., embeddings not ready), fallback to first chunks
+        if not all_retrieved_chunks:
+            from sqlalchemy import select
+            from app.models.document_chunk import DocumentChunk
+            stmt = select(DocumentChunk).where(
+                DocumentChunk.document_id == input_data.source_document_id
+            ).order_by(DocumentChunk.chunk_index).limit(20)
+            db_result = await service_tools.db.execute(stmt)
+            chunks = list(db_result.scalars().all())
+            
+            all_retrieved_chunks = [
+                {
+                    "chunk_id": str(chunk.id),
+                    "content": chunk.content,
+                    "chunk_index": chunk.chunk_index,
+                    "score": 1.0,  # Default score for fallback
+                }
+                for chunk in chunks if chunk.content
+            ]
         
         return {
             **state,
-            "search_results": search_results,
+            "search_results": all_retrieved_chunks,
             "status": "retrieving",
         }
     except Exception as e:
@@ -144,15 +179,11 @@ async def _generate_flashcards(state: FlashcardState) -> FlashcardState:
 
     # Build context from chunks with chunk_id mapping
     context_parts = []
-    chunk_id_to_index = {}  # Map chunk_id to index in search_results
-    
-    for idx, result in enumerate(search_results):
+    for result in search_results:
         chunk_id = uuid_lib.UUID(result["chunk_id"])
-        chunk_id_to_index[chunk_id] = idx
         context_parts.append(
             f"[Chunk ID: {chunk_id}, Index: {result['chunk_index']}]:\n{result['content']}"
         )
-    
     context = "\n\n".join(context_parts)
 
     try:
@@ -173,12 +204,8 @@ For each flashcard, you should reference which chunk IDs (from the Chunk ID mark
 
         # Convert to service format with chunk_id tracking
         # Map card_type to match requested mode (validate in validation step)
-        mode_to_type = {
-            "key_terms": "basic",
-            "qa": "qa",
-            "cloze": "cloze",
-        }
-        expected_type = mode_to_type.get(input_data.mode, "basic")
+        from app.core.constants import FLASHCARD_MODE_TO_CARD_TYPE
+        expected_type = FLASHCARD_MODE_TO_CARD_TYPE.get(input_data.mode, "basic")
         
         # For now, we'll associate each card with all retrieved chunks
         # In a more sophisticated implementation, the LLM could specify which chunks
@@ -260,12 +287,8 @@ def _validate_card(card: dict, requested_mode: str) -> tuple[bool, str | None]:
         return False, "back_too_short"
     
     # Check card_type matches requested mode
-    mode_to_type = {
-        "key_terms": "basic",
-        "qa": "qa",
-        "cloze": "cloze",
-    }
-    expected_type = mode_to_type.get(requested_mode, "basic")
+    from app.core.constants import FLASHCARD_MODE_TO_CARD_TYPE
+    expected_type = FLASHCARD_MODE_TO_CARD_TYPE.get(requested_mode, "basic")
     if card_type != expected_type:
         return False, "card_type_mismatch"
     
@@ -375,6 +398,11 @@ async def _handle_error(state: FlashcardState) -> FlashcardState:
     return state
 
 
+def _should_continue(state: FlashcardState) -> Literal["continue", "error"]:
+    """Check if we should continue to next step or handle error."""
+    return "error" if state.get("error") else "continue"
+
+
 def _should_continue_after_retrieve(
     state: FlashcardState
 ) -> Literal["continue", "empty", "error"]:
@@ -384,11 +412,4 @@ def _should_continue_after_retrieve(
     if not state.get("search_results"):
         return "empty"
     return "continue"
-
-
-def _should_continue_after_generate(
-    state: FlashcardState
-) -> Literal["continue", "error"]:
-    """Check if we should continue after generating flashcards."""
-    return "error" if state.get("error") else "continue"
 

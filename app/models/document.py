@@ -23,7 +23,7 @@ class Document(Base):
     __tablename__ = "documents"
     __table_args__ = (
         Index("ix_documents_workspace_id", "workspace_id"),
-        Index("ix_documents_created_by", "created_by"),
+        Index("ix_documents_user_id", "user_id"),
         Index("ix_documents_status", "status"),  # For filtering documents by status (pending, processed, etc.)
         Index("ix_documents_workspace_status", "workspace_id", "status"),  # Composite for workspace + status filtering
         Index("ix_documents_content_hash", "content_hash"),  # For deduplication lookups
@@ -37,7 +37,7 @@ class Document(Base):
         ForeignKey("workspaces.id", ondelete="CASCADE"),
         nullable=False,
     )
-    created_by: Mapped[uuid.UUID | None] = mapped_column(
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -69,7 +69,7 @@ class Document(Base):
         "Workspace", back_populates="documents"
     )
     creator: Mapped["User"] = relationship(
-        "User", back_populates="created_documents", foreign_keys=[created_by]
+        "User", back_populates="created_documents", foreign_keys=[user_id]
     )
     chunks: Mapped[list["DocumentChunk"]] = relationship(
         "DocumentChunk", back_populates="document", cascade="all, delete-orphan"

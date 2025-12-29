@@ -6,6 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import (
+    DEFAULT_AUTO_FLASHCARDS_AFTER_INGEST,
+    DEFAULT_AUTO_INGEST_ON_UPLOAD,
+    DEFAULT_AUTO_SUMMARY_AFTER_INGEST,
+    DEFAULT_FLASHCARD_MODE,
+)
 from app.infrastructure.database import get_db
 from app.schemas.common import ErrorResponse
 from app.services.user_preference_service import UserPreferenceService
@@ -16,10 +22,18 @@ router = APIRouter()
 class PreferenceRead(BaseModel):
     """Schema for reading preferences."""
     user_id: uuid.UUID = Field(description="User ID")
-    auto_ingest_on_upload: bool | None = Field(default=True, description="Auto-ingest on upload")
-    auto_summary_after_ingest: bool | None = Field(default=True, description="Auto-summary after ingest")
-    auto_flashcards_after_ingest: bool | None = Field(default=False, description="Auto-flashcards after ingest")
-    default_flashcard_mode: str | None = Field(default="qa", description="Default flashcard mode")
+    auto_ingest_on_upload: bool | None = Field(
+        default=DEFAULT_AUTO_INGEST_ON_UPLOAD, description="Auto-ingest on upload"
+    )
+    auto_summary_after_ingest: bool | None = Field(
+        default=DEFAULT_AUTO_SUMMARY_AFTER_INGEST, description="Auto-summary after ingest"
+    )
+    auto_flashcards_after_ingest: bool | None = Field(
+        default=DEFAULT_AUTO_FLASHCARDS_AFTER_INGEST, description="Auto-flashcards after ingest"
+    )
+    default_flashcard_mode: str | None = Field(
+        default=DEFAULT_FLASHCARD_MODE, description="Default flashcard mode"
+    )
 
 
 class PreferenceUpdate(BaseModel):

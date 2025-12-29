@@ -409,25 +409,23 @@ async def check_rate_limit(
 @router.post(
     "/documents/{document_id}/ingest",
     responses={
-        200: {"model": IngestionAgentOutput},
         202: {"model": AsyncTaskResponse},
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse},  # Conflict - ingestion already in progress
         500: {"model": ErrorResponse},
     },
     summary="Ingest and process a document",
-    description="Process a document: chunk it and generate embeddings. Use async=true to run in background.",
+    description="Process a document: chunk it and generate embeddings. Always runs asynchronously in background.",
 )
 async def ingest_document(
     document_id: Annotated[uuid.UUID, Path(description="Document ID to process")],
     request_body: IngestDocumentRequest,
     background_tasks: BackgroundTasks,
-    async_mode: Annotated[bool, Query(description="Run in background")] = False,
     agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
     request_id: Annotated[str, Depends(get_request_id)] = None,
-) -> IngestionAgentOutput | AsyncTaskResponse:
-    """Ingest a document using IngestionAgent."""
+) -> AsyncTaskResponse:
+    """Ingest a document using IngestionAgent. Always runs asynchronously."""
     # Rate limit check (placeholder)
     await check_rate_limit(request_body.workspace_id, request_body.user_id, request_id)
 
@@ -465,121 +463,73 @@ async def ingest_document(
         raw_text=request_body.raw_text,
     )
 
-    # If async mode, create run and return immediately
-    if async_mode:
-        try:
-            agent_run_service = AgentRunService(db)
-            input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
-            agent_run = await agent_run_service.create_run(
-                workspace_id=request_body.workspace_id,
-                user_id=request_body.user_id,
-                agent_name="ingestion",
-                input_json=input_json,
-                status="queued",
-            )
-
-            # Add to background tasks
-            agent_router = AgentRouter(db)
-            add_agent_task(
-                background_tasks,
-                "ingestion",
-                agent_router.run_ingestion,
-                input_data,
-                agent_run.id,
-                db,
-            )
-
-            return AsyncTaskResponse(
-                run_id=agent_run.id,
-                status="queued",
-                message="Document ingestion queued. Check agent_runs table for status.",
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error queuing document ingestion [request_id={request_id}]: {str(e)}",
-            )
-
-    # Synchronous execution
+    # Always run asynchronously
     try:
-        # Agent router provided via dependency (uses shared GraphRegistry)
-        result = await agent_router.run_ingestion(input_data)
+        agent_run_service = AgentRunService(db)
+        input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
+        agent_run = await agent_run_service.create_run(
+            workspace_id=request_body.workspace_id,
+            user_id=request_body.user_id,
+            agent_name="ingestion",
+            input_json=input_json,
+            status="queued",
+        )
 
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # Add to background tasks
+        agent_router = AgentRouter(db)
+        add_agent_task(
+            background_tasks,
+            "ingestion",
+            agent_router.run_ingestion,
+            input_data,
+            agent_run.id,
+            db,
+        )
+
+        return AsyncTaskResponse(
+            run_id=agent_run.id,
+            status="queued",
+            message="Document ingestion queued. Check agent_runs table for status.",
+        )
     except Exception as e:
-        # Log error with request ID
-        import logging
-        logger = logging.getLogger(__name__)
-        error_str = str(e).lower()
-        logger.error(f"Document ingestion failed [request_id={request_id}]: {str(e)}", exc_info=True)
-        
-        # Provide user-friendly error messages with "try again" guidance
-        if "timeout" in error_str or "timed out" in error_str:
-            error_msg = (
-                f"Request timed out. Please try again or contact support if the problem persists. "
-                f"[request_id={request_id}]"
-            )
-        elif "connection" in error_str or "unreachable" in error_str or "qdrant" in error_str:
-            error_msg = (
-                f"Vector database temporarily unavailable. Please try again in a moment. "
-                f"The document status has been set to 'failed' - you can retry ingestion when the service is available. "
-                f"[request_id={request_id}]"
-            )
-        elif "rate limit" in error_str or "quota" in error_str:
-            error_msg = (
-                f"Rate limit exceeded. Please wait a moment before trying again. "
-                f"[request_id={request_id}]"
-            )
-        else:
-            error_msg = (
-                f"An error occurred processing the document. The document status has been set to 'failed' - "
-                f"you can retry ingestion. If the problem persists, contact support. [request_id={request_id}]"
-            )
-        
-        raise HTTPException(status_code=500, detail=error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error queuing document ingestion [request_id={request_id}]: {str(e)}",
+        )
 
 
 @router.post(
     "/documents/{document_id}/flashcards",
     responses={
-        200: {"model": FlashcardAgentOutput},
         202: {"model": AsyncTaskResponse},
         404: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
     summary="Generate flashcards from a document",
-    description="Generate flashcards from a document using FlashcardAgent. Use async=true to run in background.",
+    description="Generate flashcards from a document using FlashcardAgent. Always runs asynchronously in background.",
 )
 async def generate_flashcards(
     document_id: Annotated[uuid.UUID, Path(description="Source document ID")],
     request_body: GenerateFlashcardsRequest,
     background_tasks: BackgroundTasks,
-    async_mode: Annotated[bool, Query(description="Run in background")] = False,
     agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
     request_id: Annotated[str, Depends(get_request_id)] = None,
-) -> FlashcardAgentOutput | AsyncTaskResponse:
-    """Generate flashcards from a document using FlashcardAgent."""
+) -> AsyncTaskResponse:
+    """Generate flashcards from a document using FlashcardAgent. Always runs asynchronously."""
     # Rate limit check (placeholder)
     await check_rate_limit(request_body.workspace_id, request_body.user_id, request_id)
 
     # Validate mode
-    valid_modes = {"key_terms", "qa", "cloze"}
-    if request_body.mode not in valid_modes:
+    from app.core.constants import FLASHCARD_MODE_TO_CARD_TYPE, FLASHCARD_MODES
+    if request_body.mode not in FLASHCARD_MODES:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid mode. Must be one of: {', '.join(valid_modes)}",
+            detail=f"Invalid mode. Must be one of: {', '.join(FLASHCARD_MODES)}",
         )
 
     # Map mode to card_type for duplicate check
-    mode_to_card_type = {
-        "key_terms": "basic",
-        "qa": "qa",
-        "cloze": "cloze",
-    }
-    card_type = mode_to_card_type[request_body.mode]
+    card_type = FLASHCARD_MODE_TO_CARD_TYPE[request_body.mode]
 
     # Check for existing flashcards (duplicate prevention)
     from app.services.flashcard_service import FlashcardService
@@ -604,102 +554,60 @@ async def generate_flashcards(
         mode=request_body.mode,
     )
 
-    # If async mode, create run and return immediately
-    if async_mode:
-        try:
-            agent_run_service = AgentRunService(db)
-            input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
-            agent_run = await agent_run_service.create_run(
-                workspace_id=request_body.workspace_id,
-                user_id=request_body.user_id,
-                agent_name="flashcard",
-                input_json=input_json,
-                status="queued",
-            )
-
-            # Add to background tasks
-            agent_router = AgentRouter(db)
-            add_agent_task(
-                background_tasks,
-                "flashcard",
-                agent_router.run_flashcard,
-                input_data,
-                agent_run.id,
-                db,
-            )
-
-            return AsyncTaskResponse(
-                run_id=agent_run.id,
-                status="queued",
-                message="Flashcard generation queued. Check agent_runs table for status.",
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error queuing flashcard generation [request_id={request_id}]: {str(e)}",
-            )
-
-    # Synchronous execution
+    # Always run asynchronously
     try:
-        # Agent router provided via dependency (uses shared GraphRegistry)
-        result = await agent_router.run_flashcard(input_data)
+        agent_run_service = AgentRunService(db)
+        input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
+        agent_run = await agent_run_service.create_run(
+            workspace_id=request_body.workspace_id,
+            user_id=request_body.user_id,
+            agent_name="flashcard",
+            input_json=input_json,
+            status="queued",
+        )
 
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # Add to background tasks
+        agent_router = AgentRouter(db)
+        add_agent_task(
+            background_tasks,
+            "flashcard",
+            agent_router.run_flashcard,
+            input_data,
+            agent_run.id,
+            db,
+        )
+
+        return AsyncTaskResponse(
+            run_id=agent_run.id,
+            status="queued",
+            message="Flashcard generation queued. Check agent_runs table for status.",
+        )
     except Exception as e:
-        # Log error with request ID
-        import logging
-        logger = logging.getLogger(__name__)
-        error_str = str(e).lower()
-        logger.error(f"Flashcard generation failed [request_id={request_id}]: {str(e)}", exc_info=True)
-        
-        # Provide user-friendly error messages with "try again" guidance
-        if "timeout" in error_str or "timed out" in error_str:
-            error_msg = (
-                f"Request timed out. Please try again with a shorter document or wait a moment. "
-                f"[request_id={request_id}]"
-            )
-        elif "connection" in error_str or "unreachable" in error_str:
-            error_msg = (
-                f"Service temporarily unavailable. Please try again in a moment. "
-                f"[request_id={request_id}]"
-            )
-        elif "rate limit" in error_str or "quota" in error_str:
-            error_msg = (
-                f"Rate limit exceeded. Please wait a moment before trying again. "
-                f"[request_id={request_id}]"
-            )
-        else:
-            error_msg = (
-                f"An error occurred generating flashcards. Please try again in a moment. "
-                f"If the problem persists, contact support. [request_id={request_id}]"
-            )
-        
-        raise HTTPException(status_code=500, detail=error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error queuing flashcard generation [request_id={request_id}]: {str(e)}",
+        )
 
 
 @router.post(
     "/documents/{document_id}/kg",
     responses={
-        200: {"model": KGExtractionAgentOutput},
         202: {"model": AsyncTaskResponse},
         404: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
     summary="Extract knowledge graph from a document",
-    description="Extract concepts and relationships from a document using KGExtractionAgent. Use async=true to run in background.",
+    description="Extract concepts and relationships from a document using KGExtractionAgent. Always runs asynchronously in background.",
 )
 async def extract_kg(
     document_id: Annotated[uuid.UUID, Path(description="Source document ID")],
     request_body: ExtractKGRequest,
     background_tasks: BackgroundTasks,
-    async_mode: Annotated[bool, Query(description="Run in background")] = False,
     agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
     request_id: Annotated[str, Depends(get_request_id)] = None,
-) -> KGExtractionAgentOutput | AsyncTaskResponse:
-    """Extract knowledge graph from a document using KGExtractionAgent."""
+) -> AsyncTaskResponse:
+    """Extract knowledge graph from a document using KGExtractionAgent. Always runs asynchronously."""
     # Rate limit check (placeholder)
     await check_rate_limit(request_body.workspace_id, request_body.user_id, request_id)
 
@@ -710,57 +618,38 @@ async def extract_kg(
         source_document_id=document_id,
     )
 
-    # If async mode, create run and return immediately
-    if async_mode:
-        try:
-            agent_run_service = AgentRunService(db)
-            input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
-            agent_run = await agent_run_service.create_run(
-                workspace_id=request_body.workspace_id,
-                user_id=request_body.user_id,
-                agent_name="kg_extraction",
-                input_json=input_json,
-                status="queued",
-            )
-
-            # Add to background tasks
-            agent_router = AgentRouter(db)
-            add_agent_task(
-                background_tasks,
-                "kg_extraction",
-                agent_router.run_kg_extraction,
-                input_data,
-                agent_run.id,
-                db,
-            )
-
-            return AsyncTaskResponse(
-                run_id=agent_run.id,
-                status="queued",
-                message="KG extraction queued. Check agent_runs table for status.",
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error queuing KG extraction [request_id={request_id}]: {str(e)}",
-            )
-
-    # Synchronous execution
+    # Always run asynchronously
     try:
-        # Agent router provided via dependency (uses shared GraphRegistry)
-        result = await agent_router.run_kg_extraction(input_data)
+        agent_run_service = AgentRunService(db)
+        input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
+        agent_run = await agent_run_service.create_run(
+            workspace_id=request_body.workspace_id,
+            user_id=request_body.user_id,
+            agent_name="kg_extraction",
+            input_json=input_json,
+            status="queued",
+        )
 
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # Add to background tasks
+        agent_router = AgentRouter(db)
+        add_agent_task(
+            background_tasks,
+            "kg_extraction",
+            agent_router.run_kg_extraction,
+            input_data,
+            agent_run.id,
+            db,
+        )
+
+        return AsyncTaskResponse(
+            run_id=agent_run.id,
+            status="queued",
+            message="KG extraction queued. Check agent_runs table for status.",
+        )
     except Exception as e:
-        # Log error with request ID
-        # TODO: Add proper logging with request_id context
-        # import logging
-        # logger.error(f"KG extraction failed [request_id={request_id}]: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Error extracting knowledge graph [request_id={request_id}]: {str(e)}",
+            detail=f"Error queuing KG extraction [request_id={request_id}]: {str(e)}",
         )
 
 
@@ -1109,24 +998,29 @@ async def get_document_summary(
 @router.post(
     "/documents/{document_id}/summary",
     responses={
-        200: {"model": SummaryAgentOutput},
         202: {"model": AsyncTaskResponse},
         404: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
     summary="Regenerate document summary",
-    description="Generate or regenerate document summary using SummaryAgent. Use async=true to run in background.",
+    description="Generate or regenerate document summary using SummaryAgent. Always runs asynchronously in background.",
 )
 async def regenerate_document_summary(
     document_id: Annotated[uuid.UUID, Path(description="Document ID")],
     background_tasks: BackgroundTasks,
-    async_mode: Annotated[bool, Query(description="Run in background")] = False,
-    max_bullets: Annotated[int, Query(description="Maximum number of bullet points", ge=1, le=20)] = 7,
+    max_bullets: Annotated[
+        int,
+        Query(
+            description="Maximum number of bullet points",
+            ge=1,
+            le=20
+        )
+    ] = 7,  # TODO: Use DEFAULT_SUMMARY_MAX_BULLETS from constants
     agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
     request_id: Annotated[str, Depends(get_request_id)] = None,
-) -> SummaryAgentOutput | AsyncTaskResponse:
-    """Regenerate document summary using SummaryAgent."""
+) -> AsyncTaskResponse:
+    """Regenerate document summary using SummaryAgent. Always runs asynchronously."""
     try:
         # Get document to extract workspace_id and user_id
         document_service = DocumentService(db)
@@ -1138,57 +1032,42 @@ async def regenerate_document_summary(
         input_data = SummaryAgentInput(
             document_id=document_id,
             workspace_id=document.workspace_id,
-            user_id=document.created_by,  # Use document creator as user_id
+            user_id=document.user_id,  # Use document user_id
             max_bullets=max_bullets,
         )
 
-        # If async mode, create run and return immediately
-        if async_mode:
-            try:
-                agent_run_service = AgentRunService(db)
-                input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
-                agent_run = await agent_run_service.create_run(
-                    workspace_id=document.workspace_id,
-                    user_id=document.created_by,
-                    agent_name="summary",
-                    input_json=input_json,
-                    status="queued",
-                )
-
-                # Add to background tasks
-                agent_router = AgentRouter(db)
-                add_agent_task(
-                    background_tasks,
-                    "summary",
-                    agent_router.run_summary,
-                    input_data,
-                    agent_run.id,
-                    db,
-                )
-
-                return AsyncTaskResponse(
-                    run_id=agent_run.id,
-                    status="queued",
-                    message="Summary generation queued. Check agent_runs table for status.",
-                )
-            except Exception as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Error queuing summary generation [request_id={request_id}]: {str(e)}",
-                )
-
-        # Synchronous execution
+        # Always run asynchronously
         try:
-            # Agent router provided via dependency (uses shared GraphRegistry)
-            result = await agent_router.run_summary(input_data)
+            agent_run_service = AgentRunService(db)
+            input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
+            agent_run = await agent_run_service.create_run(
+                workspace_id=document.workspace_id,
+                user_id=document.user_id,
+                agent_name="summary",
+                input_json=input_json,
+                status="queued",
+            )
 
-            return result
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            # Add to background tasks
+            agent_router = AgentRouter(db)
+            add_agent_task(
+                background_tasks,
+                "summary",
+                agent_router.run_summary,
+                input_data,
+                agent_run.id,
+                db,
+            )
+
+            return AsyncTaskResponse(
+                run_id=agent_run.id,
+                status="queued",
+                message="Summary generation queued. Check agent_runs table for status.",
+            )
         except Exception as e:
             raise HTTPException(
                 status_code=500,
-                detail=f"Error generating summary [request_id={request_id}]: {str(e)}",
+                detail=f"Error queuing summary generation [request_id={request_id}]: {str(e)}",
             )
     except HTTPException:
         raise

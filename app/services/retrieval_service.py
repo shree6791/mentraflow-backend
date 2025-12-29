@@ -10,18 +10,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.infrastructure.qdrant import QdrantClientWrapper
 from app.models.document_chunk import DocumentChunk
+from app.services.base import BaseService
 
 logger = logging.getLogger(__name__)
 
 
-class RetrievalService:
+class RetrievalService(BaseService):
     """Service for semantic search and retrieval."""
 
     def __init__(
         self, db: AsyncSession, qdrant_client: QdrantClientWrapper | None = None
     ):
         """Initialize service with database session and optional Qdrant client wrapper."""
-        self.db = db
+        super().__init__(db)
         # Use singleton QdrantClientWrapper for connection pooling
         self.qdrant_client = qdrant_client or QdrantClientWrapper()
 

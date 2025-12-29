@@ -1,19 +1,47 @@
 """User preference service."""
 import uuid
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import (
+    DEFAULT_AUTO_FLASHCARDS_AFTER_INGEST,
+    DEFAULT_AUTO_INGEST_ON_UPLOAD,
+    DEFAULT_AUTO_SUMMARY_AFTER_INGEST,
+    DEFAULT_FLASHCARD_MODE,
+)
 from app.models.user_preference import UserPreference
+from app.services.base import BaseService
 
 
-class UserPreferenceService:
+def get_default_preferences(user_id: uuid.UUID) -> UserPreference:
+    """Create a UserPreference instance with default values.
+    
+    This is the single source of truth for default user preferences.
+    Used by both UserService (during user creation) and UserPreferenceService
+    (when creating preferences for existing users).
+    
+    Args:
+        user_id: User ID for the preferences
+        
+    Returns:
+        UserPreference instance with default values
+    """
+    return UserPreference(
+        user_id=user_id,
+        auto_ingest_on_upload=DEFAULT_AUTO_INGEST_ON_UPLOAD,
+        auto_summary_after_ingest=DEFAULT_AUTO_SUMMARY_AFTER_INGEST,
+        auto_flashcards_after_ingest=DEFAULT_AUTO_FLASHCARDS_AFTER_INGEST,
+        default_flashcard_mode=DEFAULT_FLASHCARD_MODE,
+    )
+
+
+class UserPreferenceService(BaseService):
     """Service for user preference operations."""
 
     def __init__(self, db: AsyncSession):
         """Initialize service with database session."""
-        self.db = db
+        super().__init__(db)
 
     async def get_preferences(
         self,
@@ -26,17 +54,10 @@ class UserPreferenceService:
         preference = result.scalar_one_or_none()
         
         if not preference:
-            # Create default preferences
-            preference = UserPreference(
-                user_id=user_id,
-                auto_ingest_on_upload=True,
-                auto_summary_after_ingest=True,
-                auto_flashcards_after_ingest=False,
-                default_flashcard_mode="qa",
-            )
+            # Create default preferences using single source of truth
+            preference = get_default_preferences(user_id)
             self.db.add(preference)
-            await self.db.commit()
-            await self.db.refresh(preference)
+            await self._commit_and_refresh(preference)
         
         return preference
 
@@ -51,20 +72,15 @@ class UserPreferenceService:
         """Update user preferences."""
         preference = await self.get_preferences(user_id)
         
-        try:
-            if auto_ingest_on_upload is not None:
-                preference.auto_ingest_on_upload = auto_ingest_on_upload
-            if auto_summary_after_ingest is not None:
-                preference.auto_summary_after_ingest = auto_summary_after_ingest
-            if auto_flashcards_after_ingest is not None:
-                preference.auto_flashcards_after_ingest = auto_flashcards_after_ingest
-            if default_flashcard_mode is not None:
-                preference.default_flashcard_mode = default_flashcard_mode
-            
-            await self.db.commit()
-            await self.db.refresh(preference)
-            return preference
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while updating preferences: {str(e)}") from e
+        if auto_ingest_on_upload is not None:
+            preference.auto_ingest_on_upload = auto_ingest_on_upload
+        if auto_summary_after_ingest is not None:
+            preference.auto_summary_after_ingest = auto_summary_after_ingest
+        if auto_flashcards_after_ingest is not None:
+            preference.auto_flashcards_after_ingest = auto_flashcards_after_ingest
+        if default_flashcard_mode is not None:
+            preference.default_flashcard_mode = default_flashcard_mode
+        
+        await self._commit_and_refresh(preference)
+        return preference
 

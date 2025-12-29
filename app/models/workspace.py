@@ -26,7 +26,7 @@ class Workspace(Base):
     """Workspace model."""
 
     __tablename__ = "workspaces"
-    __table_args__ = (Index("ix_workspaces_owner_user_id", "owner_user_id"),)
+    __table_args__ = (Index("ix_workspaces_owner_id", "owner_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -34,7 +34,7 @@ class Workspace(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     # Note: CASCADE means deleting the owner user will delete the entire workspace
     # and all its data. Consider implementing ownership transfer before user deletion.
-    owner_user_id: Mapped[uuid.UUID] = mapped_column(
+    owner_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     plan_tier: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -52,7 +52,7 @@ class Workspace(Base):
 
     # Relationships
     owner: Mapped["User"] = relationship(
-        "User", back_populates="owned_workspaces", foreign_keys=[owner_user_id]
+        "User", back_populates="owned_workspaces", foreign_keys=[owner_id]
     )
     memberships: Mapped[list["WorkspaceMembership"]] = relationship(
         "WorkspaceMembership", back_populates="workspace", cascade="all, delete-orphan"

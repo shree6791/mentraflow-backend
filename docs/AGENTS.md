@@ -59,7 +59,8 @@ class IngestionAgentOutput(BaseModel):
 3. **Generate Embeddings** - Create vector embeddings using OpenAI `text-embedding-3-small`
 4. **Store in Qdrant** - Upsert vectors to Qdrant collection (`mentraflow_chunks`)
 5. **Generate Summary** (optional) - If `auto_summary_after_ingest` preference is enabled, generate summary using `SummaryAgent`
-6. **Update Status** - Mark document as `ready` or `failed`
+6. **Generate Flashcards** (optional) - If `auto_flashcards_after_ingest` preference is enabled, generate flashcards using `FlashcardAgent` with `default_flashcard_mode`
+7. **Update Status** - Mark document as `ready` or `failed`
 
 ### Key Features
 

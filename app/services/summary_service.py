@@ -5,24 +5,24 @@ import re
 from collections import Counter
 from typing import Any
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
+from app.services.base import BaseService
 from app.services.retrieval_service import RetrievalService
 
 logger = logging.getLogger(__name__)
 
 
-class SummaryService:
+class SummaryService(BaseService):
     """Service for generating document summaries."""
 
     def __init__(self, db: AsyncSession):
         """Initialize service with database session."""
-        self.db = db
+        super().__init__(db)
         self.retrieval_service = RetrievalService(db)
 
     def _analyze_content_quality(self, chunks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -90,7 +90,7 @@ class SummaryService:
     async def generate_summary(
         self,
         document_id: uuid.UUID,
-        max_bullets: int = 7,
+        max_bullets: int | None = None,
     ) -> str:
         """Generate a summary for a document using semantic retrieval and quality-aware LLM.
         
@@ -99,12 +99,16 @@ class SummaryService:
         
         Args:
             document_id: Document ID
-            max_bullets: Maximum number of bullet points in summary (default: 7)
+            max_bullets: Maximum number of bullet points in summary (default: from constants)
             
         Returns:
             Summary text as a string
         """
         try:
+            # Use default if not provided
+            if max_bullets is None:
+                max_bullets = DEFAULT_SUMMARY_MAX_BULLETS
+            
             # Get document
             stmt = select(Document).where(Document.id == document_id)
             result = await self.db.execute(stmt)
@@ -264,18 +268,13 @@ If the content is repetitive or lacks clear structure, emphasize themes over det
         summary_text: str,
     ) -> Document:
         """Store summary in document."""
-        try:
-            stmt = select(Document).where(Document.id == document_id)
-            result = await self.db.execute(stmt)
-            document = result.scalar_one_or_none()
-            if not document:
-                raise ValueError(f"Document {document_id} not found")
-            
-            document.summary_text = summary_text
-            await self.db.commit()
-            await self.db.refresh(document)
-            return document
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while storing summary: {str(e)}") from e
+        stmt = select(Document).where(Document.id == document_id)
+        result = await self.db.execute(stmt)
+        document = result.scalar_one_or_none()
+        if not document:
+            raise ValueError(f"Document {document_id} not found")
+        
+        document.summary_text = summary_text
+        await self._commit_and_refresh(document)
+        return document
 

@@ -67,20 +67,19 @@ class SummaryAgent(BaseAgent[SummaryAgentInput, SummaryAgentOutput]):
         # Run graph
         final_state = await self.graph.ainvoke(initial_state)
 
-        # Handle errors from graph
-        if final_state.get("error") or final_state["status"] == "failed":
-            error_msg = final_state.get("error", "Summary generation failed")
-            raise ValueError(error_msg)
+        # Check for errors
+        self._check_and_raise_error(final_state, "Summary generation failed")
 
-        # Extract output from final state
+        # Extract and validate summary
         summary = final_state.get("summary", "")
         if not summary:
             raise ValueError("Summary generation completed but no summary was produced")
 
+        # Return output (run_id will be set by BaseAgent._execute_with_logging)
         return SummaryAgentOutput(
             document_id=input_data.document_id,
             summary=summary,
             summary_length=len(summary),
-            run_id=getattr(self, "_current_run_id", None),
+            run_id=self._get_run_id(),
         )
 

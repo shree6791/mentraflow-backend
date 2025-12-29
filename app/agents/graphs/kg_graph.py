@@ -85,8 +85,10 @@ def build_kg_extraction_graph(service_tools: Any, llm: Any, system_prompt: str) 
     workflow.add_node("build_output", _build_output)
     workflow.add_node("handle_error", _handle_error)
 
-    # Define edges
+    # Define workflow edges (linear flow with error handling)
     workflow.set_entry_point("retrieve_chunks")
+    
+    # Retrieve chunks - can return early if empty, or continue/error
     workflow.add_conditional_edges(
         "retrieve_chunks",
         _should_continue_after_retrieve,
@@ -96,33 +98,40 @@ def build_kg_extraction_graph(service_tools: Any, llm: Any, system_prompt: str) 
             "error": "handle_error",
         },
     )
+    
+    # Extract KG - continue or error
     workflow.add_conditional_edges(
         "extract_kg",
-        _should_continue_after_extract,
+        _should_continue,
         {
             "continue": "prepare_concepts",
             "error": "handle_error",
         },
     )
+    
+    # Prepare and upsert concepts (sequential)
     workflow.add_edge("prepare_concepts", "upsert_concepts")
     workflow.add_conditional_edges(
         "upsert_concepts",
-        _should_continue_after_upsert_concepts,
+        _should_continue,
         {
             "continue": "build_name_mapping",
             "error": "handle_error",
         },
     )
+    
+    # Build name mapping, prepare edges, upsert edges (sequential)
     workflow.add_edge("build_name_mapping", "prepare_edges")
     workflow.add_edge("prepare_edges", "upsert_edges")
     workflow.add_conditional_edges(
         "upsert_edges",
-        _should_continue_after_upsert_edges,
+        _should_continue,
         {
             "continue": "build_output",
             "error": "handle_error",
         },
     )
+    
     workflow.add_edge("build_output", END)
     workflow.add_edge("handle_error", END)
 
@@ -133,6 +142,7 @@ async def _retrieve_chunks(state: KGExtractionState) -> KGExtractionState:
     """Retrieve relevant chunks."""
     input_data = state["input_data"]
     service_tools = state["service_tools"]
+    
     try:
         search_results = await service_tools.retrieval_service.semantic_search(
             input_data.workspace_id,
@@ -205,7 +215,7 @@ async def _upsert_concepts(state: KGExtractionState) -> KGExtractionState:
     input_data = state["input_data"]
     concepts_data = state["concepts_data"]
     service_tools = state["service_tools"]
-
+    
     try:
         created_concepts = await service_tools.kg_service.upsert_concepts(
             input_data.workspace_id,
@@ -259,7 +269,7 @@ async def _upsert_edges(state: KGExtractionState) -> KGExtractionState:
     input_data = state["input_data"]
     edges_data = state["edges_data"]
     service_tools = state["service_tools"]
-
+    
     try:
         created_edges = await service_tools.kg_service.upsert_edges(
             input_data.workspace_id,
@@ -327,23 +337,7 @@ def _should_continue_after_retrieve(
     return "continue"
 
 
-def _should_continue_after_extract(
-    state: KGExtractionState
-) -> Literal["continue", "error"]:
-    """Check if we should continue after extraction."""
-    return "error" if state.get("error") else "continue"
-
-
-def _should_continue_after_upsert_concepts(
-    state: KGExtractionState
-) -> Literal["continue", "error"]:
-    """Check if we should continue after upserting concepts."""
-    return "error" if state.get("error") else "continue"
-
-
-def _should_continue_after_upsert_edges(
-    state: KGExtractionState
-) -> Literal["continue", "error"]:
-    """Check if we should continue after upserting edges."""
+def _should_continue(state: KGExtractionState) -> Literal["continue", "error"]:
+    """Check if we should continue to next step or handle error."""
     return "error" if state.get("error") else "continue"
 

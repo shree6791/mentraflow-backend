@@ -349,8 +349,14 @@ async def _store_summary(state: SummaryState) -> SummaryState:
             raise ValueError(f"Document {input_data.document_id} not found")
 
         document.summary_text = summary
+        # Flush to ensure the change is in the session before commit
+        await db.flush()
         await db.commit()
         await db.refresh(document)
+        
+        # Verify the summary was actually stored
+        if not document.summary_text:
+            raise ValueError("Summary was not stored in document after commit")
 
         await _log_step(state, "store_summary", "completed")
 
@@ -362,23 +368,9 @@ async def _store_summary(state: SummaryState) -> SummaryState:
         return {**state, "error": str(e), "status": "failed"}
 
 
-def _should_continue_after_retrieve(state: SummaryState) -> Literal["continue", "error"]:
-    """Check if we should continue after retrieval."""
-    if state.get("error") or state["status"] == "failed":
-        return "error"
-    return "continue"
-
-
-def _should_continue_after_analyze(state: SummaryState) -> Literal["continue", "error"]:
-    """Check if we should continue after quality analysis."""
-    if state.get("error") or state["status"] == "failed":
-        return "error"
-    return "continue"
-
-
-def _should_continue_after_generate(state: SummaryState) -> Literal["continue", "error"]:
-    """Check if we should continue after generation."""
-    if state.get("error") or state["status"] == "failed":
+def _should_continue(state: SummaryState) -> Literal["continue", "error"]:
+    """Check if we should continue to next step or handle error."""
+    if state.get("error") or state.get("status") == "failed":
         return "error"
     return "continue"
 
@@ -411,11 +403,11 @@ def build_summary_graph(service_tools: Any, llm: Any, system_prompt: str, db: An
     workflow.add_node("store_summary", _store_summary)
     workflow.add_node("handle_error", _handle_error)
 
-    # Define edges
+    # Define workflow edges (linear flow with error handling)
     workflow.set_entry_point("retrieve_chunks")
     workflow.add_conditional_edges(
         "retrieve_chunks",
-        _should_continue_after_retrieve,
+        _should_continue,
         {
             "continue": "analyze_quality",
             "error": "handle_error",
@@ -423,7 +415,7 @@ def build_summary_graph(service_tools: Any, llm: Any, system_prompt: str, db: An
     )
     workflow.add_conditional_edges(
         "analyze_quality",
-        _should_continue_after_analyze,
+        _should_continue,
         {
             "continue": "generate_summary",
             "error": "handle_error",
@@ -431,7 +423,7 @@ def build_summary_graph(service_tools: Any, llm: Any, system_prompt: str, db: An
     )
     workflow.add_conditional_edges(
         "generate_summary",
-        _should_continue_after_generate,
+        _should_continue,
         {
             "continue": "store_summary",
             "error": "handle_error",

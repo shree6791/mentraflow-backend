@@ -34,7 +34,7 @@ class UserPreference(Base):
     # MentraFlow v1 preferences
     auto_ingest_on_upload: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     auto_summary_after_ingest: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
-    auto_flashcards_after_ingest: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    auto_flashcards_after_ingest: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     default_flashcard_mode: Mapped[str | None] = mapped_column(Text, nullable=True, default="qa")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -1,6 +1,7 @@
 """Knowledge Graph endpoints (v1.5)."""
 import uuid
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,12 +22,17 @@ class ConceptRead(BaseModel):
     type: str | None = Field(default=None, description="Concept type")
     aliases: list[str] | None = Field(default=None, description="Concept aliases")
     tags: list[str] | None = Field(default=None, description="Concept tags")
-    metadata: dict | None = Field(default=None, description="Additional metadata")
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Additional metadata",
+        alias="meta_data",  # Read from model's meta_data attribute
+        serialization_alias="metadata",  # Serialize as metadata in API response
+    )
     created_by: uuid.UUID | None = Field(default=None, description="Creator user ID")
-    created_at: str = Field(description="Creation timestamp")
-    updated_at: str = Field(description="Last update timestamp")
+    created_at: datetime = Field(description="Creation timestamp")
+    updated_at: datetime = Field(description="Last update timestamp")
     
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class EdgeRead(BaseModel):
@@ -39,9 +45,9 @@ class EdgeRead(BaseModel):
     dst_type: str = Field(description="Destination type")
     dst_id: uuid.UUID = Field(description="Destination concept ID")
     weight: float | None = Field(default=None, description="Edge weight")
-    evidence: dict | None = Field(default=None, description="Edge evidence")
+    evidence: dict[str, Any] | None = Field(default=None, description="Edge evidence")
     created_by: uuid.UUID | None = Field(default=None, description="Creator user ID")
-    created_at: str = Field(description="Creation timestamp")
+    created_at: datetime = Field(description="Creation timestamp")
     
     model_config = ConfigDict(from_attributes=True)
 

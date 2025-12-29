@@ -48,8 +48,6 @@ class FlashcardAgent(BaseAgent[FlashcardAgentInput, FlashcardAgentOutput]):
     async def _run_internal(self) -> FlashcardAgentOutput:
         """Internal run method using LangGraph."""
         input_data = self._current_input
-
-        # Generate batch_id for this generation run
         batch_id = uuid.uuid4()
 
         # Initialize state (includes service_tools, llm, and system_prompt for graph nodes)
@@ -80,7 +78,7 @@ class FlashcardAgent(BaseAgent[FlashcardAgentInput, FlashcardAgentOutput]):
             return FlashcardAgentOutput(
                 flashcards_created=0,
                 preview=[],
-                reason="no_content",  # Explicit reason for empty result
+                reason="no_content",
                 dropped_count=0,
                 dropped_reasons=[],
                 batch_id=batch_id,
@@ -93,20 +91,17 @@ class FlashcardAgent(BaseAgent[FlashcardAgentInput, FlashcardAgentOutput]):
             return FlashcardAgentOutput(
                 flashcards_created=0,
                 preview=[],
-                reason="insufficient_content",  # All cards were dropped
+                reason="insufficient_content",
                 dropped_count=len(dropped_cards),
                 dropped_reasons=dropped_cards,
                 batch_id=batch_id,
             )
 
         # Check for errors
-        if final_state.get("error") or final_state.get("status") == "failed":
-            raise ValueError(final_state.get("error", "Flashcard generation failed"))
-
-        # Get dropped cards info
-        dropped_cards = final_state.get("dropped_cards", [])
+        self._check_and_raise_error(final_state, "Flashcard generation failed")
 
         # Return output
+        dropped_cards = final_state.get("dropped_cards", [])
         return FlashcardAgentOutput(
             flashcards_created=len(final_state["flashcards"]),
             preview=final_state["preview"],

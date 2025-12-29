@@ -158,8 +158,17 @@ class QdrantClientWrapper:
                 )
             )
 
-        # Upsert points
-        self.client.upsert(collection_name=collection_name, points=point_structs)
+        # Upsert points (run synchronous call in thread pool to avoid blocking)
+        import asyncio
+        try:
+            await asyncio.to_thread(
+                self.client.upsert,
+                collection_name=collection_name,
+                points=point_structs,
+            )
+        except Exception as e:
+            logger.error(f"Failed to upsert points to {collection_name}: {str(e)}", exc_info=True)
+            raise
 
     async def search(
         self,
@@ -208,24 +217,59 @@ class QdrantClientWrapper:
         
         qdrant_filter = Filter(must=conditions) if conditions else None
 
-        # Perform search
-        search_results = self.client.search(
-            collection_name=collection_name,
-            query_vector=vector,
-            limit=top_k,
-            query_filter=qdrant_filter,
-        )
+        # Perform search (run synchronous call in thread pool to avoid blocking)
+        import asyncio
+        try:
+            # Qdrant Python client uses 'query_points' method (or 'search' in older versions)
+            # Try 'query_points' first (newer API), fallback to 'search' if it doesn't exist
+            if hasattr(self.client, 'query_points'):
+                search_results = await asyncio.to_thread(
+                    self.client.query_points,
+                    collection_name=collection_name,
+                    query=vector,
+                    limit=top_k,
+                    query_filter=qdrant_filter,
+                )
+                # query_points returns a QueryResponse object, extract points
+                search_results = search_results.points if hasattr(search_results, 'points') else []
+            elif hasattr(self.client, 'search'):
+                search_results = await asyncio.to_thread(
+                    self.client.search,
+                    collection_name=collection_name,
+                    query_vector=vector,
+                    limit=top_k,
+                    query_filter=qdrant_filter,
+                )
+            else:
+                raise AttributeError("QdrantClient has neither 'query_points' nor 'search' method")
+        except Exception as e:
+            logger.error(f"❌ Failed to search {collection_name}: {str(e)}", exc_info=True)
+            raise
 
         # Convert to list of dictionaries
+        # Handle both query_points (returns QueryResponse with points) and search (returns list of ScoredPoint)
         results = []
         for result in search_results:
-            results.append(
-                {
-                    "id": result.id,
-                    "score": result.score,
-                    "payload": result.payload,
-                }
-            )
+            # query_points returns ScoredPoint objects, search also returns ScoredPoint objects
+            # Both have id, score, and payload attributes
+            if hasattr(result, 'id') and hasattr(result, 'score') and hasattr(result, 'payload'):
+                results.append(
+                    {
+                        "id": result.id,
+                        "score": result.score,
+                        "payload": result.payload,
+                    }
+                )
+            else:
+                # Fallback: if structure is different, try to extract what we can
+                logger.warning(f"Unexpected search result structure: {type(result)}")
+                results.append(
+                    {
+                        "id": getattr(result, 'id', None),
+                        "score": getattr(result, 'score', 0.0),
+                        "payload": getattr(result, 'payload', {}),
+                    }
+                )
 
         return results
 

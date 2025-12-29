@@ -95,12 +95,12 @@ curl -X POST "http://localhost:8000/api/v1/workspaces?owner_username=shree6791" 
 ---
 
 ### List Workspaces
-**GET** `/api/v1/workspaces?owner_user_id={user_id}`
+**GET** `/api/v1/workspaces?owner_id={user_id}`
 
 List workspaces.
 
 **Query Parameters:**
-- `owner_user_id` (UUID, optional): Filter by owner
+- `owner_id` (UUID, optional): Filter by owner user ID
 
 **Response:** `200 OK`
 ```json
@@ -121,7 +121,7 @@ List workspaces.
 curl "http://localhost:8000/api/v1/workspaces"
 
 # List workspaces for a specific owner
-curl "http://localhost:8000/api/v1/workspaces?owner_user_id=550e8400-e29b-41d4-a716-446655440001"
+curl "http://localhost:8000/api/v1/workspaces?owner_id=550e8400-e29b-41d4-a716-446655440001"
 ```
 
 ---
@@ -225,7 +225,7 @@ Create a new document in a workspace.
 {
   "id": "550e8400-e29b-41d4-a716-446655440002",
   "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-  "created_by": "550e8400-e29b-41d4-a716-446655440001",
+  "user_id": "550e8400-e29b-41d4-a716-446655440001",
   "title": "My Study Document",
   "status": "pending",
   "created_at": "2024-01-01T00:00:00Z"
@@ -382,15 +382,12 @@ curl "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-44665544000
 ---
 
 ### Ingest Document
-**POST** `/api/v1/documents/{document_id}/ingest?async=false`
+**POST** `/api/v1/documents/{document_id}/ingest`
 
-Process a document: chunk it and generate embeddings.
+Process a document: chunk it and generate embeddings. Always runs asynchronously in background.
 
 **Path Parameters:**
 - `document_id` (UUID): Document ID to process
-
-**Query Parameters:**
-- `async` (boolean, default: `false`): Run in background
 
 **Request Body:**
 ```json
@@ -401,36 +398,25 @@ Process a document: chunk it and generate embeddings.
 }
 ```
 
-**Response:** `200 OK` (synchronous) or `202 Accepted` (async)
+**Response:** `202 Accepted`
 ```json
 {
-  "document_id": "550e8400-e29b-41d4-a716-446655440002",
-  "chunks_created": 10,
-  "embeddings_generated": 10,
-  "status": "processed",
-  "run_id": "550e8400-e29b-41d4-a716-446655440003"
+  "run_id": "550e8400-e29b-41d4-a716-446655440003",
+  "status": "queued",
+  "message": "Document ingestion queued. Check agent_runs table for status."
 }
 ```
 
-**Note:** Uses OpenAI embeddings (`text-embedding-3-small`) and optionally generates summary with `gpt-4o-mini`.
+**Note:** Uses OpenAI embeddings (`text-embedding-3-small`) and optionally generates summary with `gpt-4o-mini`. Ingestion also happens automatically during document upload if `auto_ingest_on_upload=true` in user preferences.
 
 **cURL Example:**
 ```bash
-# Synchronous ingestion
-curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/ingest?async=false" \
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/ingest" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
     "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "raw_text": "Optional: additional text to store"
-  }'
-
-# Asynchronous ingestion
-curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/ingest?async=true" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001"
   }'
 ```
 
@@ -460,30 +446,19 @@ curl "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-44665544000
 ---
 
 ### Regenerate Document Summary
-**POST** `/api/v1/documents/{document_id}/summary?async=false&max_bullets=7`
+**POST** `/api/v1/documents/{document_id}/summary?max_bullets=7`
 
-Generate or regenerate document summary using SummaryAgent.
+Generate or regenerate document summary using SummaryAgent. Always runs asynchronously in background.
 
 **Path Parameters:**
 - `document_id` (UUID): Document ID
 
 **Query Parameters:**
-- `async` (boolean, default: `false`): Run in background
 - `max_bullets` (integer, default: `7`, range: 1-20): Maximum number of bullet points in summary
 
-**Response:** `200 OK` (synchronous) or `202 Accepted` (async)
+**Response:** `202 Accepted`
 
-**Synchronous Response (`200 OK`):**
-```json
-{
-  "document_id": "550e8400-e29b-41d4-a716-446655440002",
-  "summary": "This document discusses...",
-  "summary_length": 450,
-  "run_id": "550e8400-e29b-41d4-a716-446655440003"
-}
-```
-
-**Asynchronous Response (`202 Accepted`):**
+**Response (`202 Accepted`):**
 ```json
 {
   "run_id": "550e8400-e29b-41d4-a716-446655440003",
@@ -492,33 +467,26 @@ Generate or regenerate document summary using SummaryAgent.
 }
 ```
 
-**Note:** Uses OpenAI `gpt-4o-mini` for summary generation via SummaryAgent. The agent uses semantic retrieval to find important chunks and generates a conservative, quality-aware summary.
+**Note:** Uses OpenAI `gpt-4o-mini` for summary generation via SummaryAgent. The agent uses semantic retrieval to find important chunks and generates a conservative, quality-aware summary. The summary is stored in the `documents.summary_text` column.
 
 **cURL Example:**
 ```bash
-# Synchronous summary generation (default 7 bullets)
-curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/summary?async=false"
+# Summary generation (default 7 bullets)
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/summary"
 
-# Synchronous summary generation with custom max_bullets
-curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/summary?async=false&max_bullets=10"
-
-# Asynchronous summary generation
-curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/summary?async=true"
+# Summary generation with custom max_bullets
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/summary?max_bullets=10"
 ```
 
 ---
 
 ### Generate Flashcards
-**POST** `/api/v1/documents/{document_id}/flashcards?mode=key_terms&async=false`
+**POST** `/api/v1/documents/{document_id}/flashcards`
 
-Generate flashcards from a document.
+Generate flashcards from a document. Always runs asynchronously in background.
 
 **Path Parameters:**
 - `document_id` (UUID): Source document ID
-
-**Query Parameters:**
-- `async` (boolean, default: `false`): Run in background
-- `mode` (string): `key_terms`, `qa`, or `cloze`
 
 **Request Body:**
 ```json
@@ -529,59 +497,40 @@ Generate flashcards from a document.
 }
 ```
 
-**Response:** `200 OK`
+**Request Body Parameters:**
+- `mode` (string, required): `key_terms`, `qa`, or `cloze`
+
+**Response:** `202 Accepted`
 ```json
 {
-  "flashcards_created": 5,
-  "preview": [
-    {
-      "front": "What is...?",
-      "back": "...",
-      "card_type": "key_terms",
-      "source_chunk_ids": ["..."]
-    }
-  ],
-  "dropped_count": 0,
-  "dropped_reasons": [],
-  "batch_id": "550e8400-e29b-41d4-a716-446655440004"
+  "run_id": "550e8400-e29b-41d4-a716-446655440004",
+  "status": "queued",
+  "message": "Flashcard generation queued. Check agent_runs table for status."
 }
 ```
 
-**Note:** Uses OpenAI `gpt-4o-mini` for flashcard generation.
+**Note:** Uses OpenAI `gpt-4o-mini` for flashcard generation. Flashcards are also generated automatically after ingestion if `auto_flashcards_after_ingest=true` in user preferences.
 
 **cURL Example:**
 ```bash
-# Synchronous flashcard generation
-curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/flashcards?mode=key_terms&async=false" \
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/flashcards" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
     "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "mode": "key_terms"
   }'
-
-# Asynchronous flashcard generation
-curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/flashcards?mode=qa&async=true" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
-    "mode": "qa"
-  }'
 ```
 
 ---
 
 ### Extract Knowledge Graph
-**POST** `/api/v1/documents/{document_id}/kg?async=false`
+**POST** `/api/v1/documents/{document_id}/kg`
 
-Extract concepts and relationships from a document.
+Extract concepts and relationships from a document. Always runs asynchronously in background.
 
 **Path Parameters:**
 - `document_id` (UUID): Source document ID
-
-**Query Parameters:**
-- `async` (boolean, default: `false`): Run in background
 
 **Request Body:**
 ```json
@@ -591,44 +540,20 @@ Extract concepts and relationships from a document.
 }
 ```
 
-**Response:** `200 OK`
+**Response:** `202 Accepted`
 ```json
 {
-  "concepts_written": 10,
-  "edges_written": 15,
-  "concepts": [
-    {
-      "id": "...",
-      "name": "Machine Learning",
-      "description": "...",
-      "type": "concept"
-    }
-  ],
-  "edges": [
-    {
-      "id": "...",
-      "src_id": "...",
-      "rel_type": "relates_to",
-      "dst_id": "..."
-    }
-  ]
+  "run_id": "550e8400-e29b-41d4-a716-446655440003",
+  "status": "queued",
+  "message": "KG extraction queued. Check agent_runs table for status."
 }
 ```
 
-**Note:** Uses OpenAI `gpt-4o-mini` for KG extraction.
+**Note:** Uses OpenAI `gpt-4o-mini` for KG extraction. Concepts and relationships are stored in Qdrant vector database.
 
 **cURL Example:**
 ```bash
-# Synchronous KG extraction
-curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/kg?async=false" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001"
-  }'
-
-# Asynchronous KG extraction
-curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/kg?async=true" \
+curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/kg" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -1187,7 +1112,7 @@ Get user preferences, creating defaults if not exists.
   "user_id": "550e8400-e29b-41d4-a716-446655440001",
   "auto_ingest_on_upload": true,
   "auto_summary_after_ingest": true,
-  "auto_flashcards_after_ingest": false,
+  "auto_flashcards_after_ingest": true,
   "default_flashcard_mode": "qa"
 }
 ```
@@ -1628,15 +1553,17 @@ curl -X POST "http://localhost:8000/api/v1/documents" \
 
 **Save the `document_id` from the response.**
 
-### Step 4: Ingest the Document
+### Step 4: Ingest the Document (if not auto-ingested)
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/ingest?async=false" \
+curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/ingest" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "{workspace_id}",
     "user_id": "550e8400-e29b-41d4-a716-446655440001"
   }'
 ```
+
+**Note:** Ingestion happens automatically during document upload if `auto_ingest_on_upload=true`. Ingestion always runs asynchronously.
 
 ### Step 5: Chat with the Document
 ```bash
@@ -1652,7 +1579,7 @@ curl -X POST "http://localhost:8000/api/v1/chat" \
 
 ### Step 6: Generate Flashcards (Optional)
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/flashcards?mode=key_terms&async=false" \
+curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/flashcards" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "{workspace_id}",
@@ -1661,15 +1588,34 @@ curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/flashcards?mo
   }'
 ```
 
+**Note:** Flashcard generation always runs asynchronously. The response includes a `run_id` for tracking.
+
 ### Step 7: Extract Knowledge Graph (Optional)
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/kg?async=false" \
+curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/kg" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "{workspace_id}",
     "user_id": "550e8400-e29b-41d4-a716-446655440001"
   }'
 ```
+
+**Note:** KG extraction always runs asynchronously. The response includes a `run_id` for tracking.
+    "mode": "key_terms"
+  }'
+```
+
+### Step 7: Extract Knowledge Graph (Optional)
+```bash
+curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/kg" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "{workspace_id}",
+    "user_id": "550e8400-e29b-41d4-a716-446655440001"
+  }'
+```
+
+**Note:** KG extraction always runs asynchronously. The response includes a `run_id` for tracking.
 
 ### Step 8: Review Flashcards (Optional)
 ```bash
@@ -1689,7 +1635,7 @@ curl -X POST "http://localhost:8000/api/v1/flashcards/{flashcard_id}/review" \
 
 1. **UUIDs**: Replace all UUID placeholders with actual UUIDs from your database
 2. **Workspace & User IDs**: You need valid `workspace_id` and `user_id` values
-3. **Async Mode**: Add `?async=true` to any document processing endpoint to run in background
+3. **Async Operations**: All document processing endpoints (ingest, summary, flashcards, KG extraction) run asynchronously by default. Responses include a `run_id` for tracking status.
 4. **OpenAPI Docs**: Visit `http://localhost:8000/api/v1/openapi.json` or `http://localhost:8000/docs` for interactive API documentation
 5. **OpenAI Usage**: Routes that use OpenAI are marked with notes. See `OPENAI_SETUP_GUIDE.md` for details
 6. **Error Responses**: All endpoints return standard error responses with `ErrorResponse` schema:

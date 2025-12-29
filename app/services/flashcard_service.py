@@ -3,21 +3,21 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.flashcard import Flashcard
 from app.models.flashcard_review import FlashcardReview
 from app.models.flashcard_srs_state import FlashcardSRSState
+from app.services.base import BaseService
 
 
-class FlashcardService:
+class FlashcardService(BaseService):
     """Service for flashcard operations with SRS."""
 
     def __init__(self, db: AsyncSession):
         """Initialize service with database session."""
-        self.db = db
+        super().__init__(db)
 
     async def create_flashcards_from_text(
         self,
@@ -36,32 +36,25 @@ class FlashcardService:
             cards: List of card dictionaries
             batch_id: Optional batch/generation ID to group cards from same run
         """
-        try:
-            flashcards = []
-            for card_data in cards:
-                flashcard = Flashcard(
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    document_id=source_document_id,
-                    card_type=card_data.get("card_type", "basic"),
-                    front=card_data.get("front"),
-                    back=card_data.get("back"),
-                    source_chunk_ids=card_data.get("source_chunk_ids"),
-                    batch_id=batch_id,
-                    tags=card_data.get("tags"),
-                    meta_data=card_data.get("metadata"),
-                )
-                self.db.add(flashcard)
-                flashcards.append(flashcard)
+        flashcards = []
+        for card_data in cards:
+            flashcard = Flashcard(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                document_id=source_document_id,
+                card_type=card_data.get("card_type", "basic"),
+                front=card_data.get("front"),
+                back=card_data.get("back"),
+                source_chunk_ids=card_data.get("source_chunk_ids"),
+                batch_id=batch_id,
+                tags=card_data.get("tags"),
+                meta_data=card_data.get("metadata"),
+            )
+            self.db.add(flashcard)
+            flashcards.append(flashcard)
 
-            await self.db.commit()
-            for flashcard in flashcards:
-                await self.db.refresh(flashcard)
-
-            return flashcards
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while creating flashcards: {str(e)}") from e
+        await self._commit_and_refresh(*flashcards)
+        return flashcards
 
     async def find_existing_flashcards(
         self,
@@ -218,88 +211,81 @@ class FlashcardService:
         if not isinstance(grade, int) or grade < 0 or grade > 4:
             raise ValueError(f"Grade must be an integer between 0 and 4, got: {grade}")
 
-        try:
-            # Get flashcard
-            stmt = select(Flashcard).where(Flashcard.id == flashcard_id)
-            result = await self.db.execute(stmt)
-            flashcard = result.scalar_one_or_none()
-            if not flashcard:
-                raise ValueError(f"Flashcard {flashcard_id} not found")
+        # Get flashcard
+        stmt = select(Flashcard).where(Flashcard.id == flashcard_id)
+        result = await self.db.execute(stmt)
+        flashcard = result.scalar_one_or_none()
+        if not flashcard:
+            raise ValueError(f"Flashcard {flashcard_id} not found")
 
-            # Get or create SRS state
-            stmt = select(FlashcardSRSState).where(
-                (FlashcardSRSState.flashcard_id == flashcard_id)
-                & (FlashcardSRSState.user_id == user_id)
-            )
-            result = await self.db.execute(stmt)
-            srs_state = result.scalar_one_or_none()
-            
-            # Get current time (used for checks and updates)
-            now = datetime.now(timezone.utc)
-            
-            # Check if card is due (unless forced)
-            if not force and srs_state:
-                # Check due date
-                if srs_state.due_at and srs_state.due_at > now:
-                    raise ValueError(
-                        f"Card not due yet. Next review: {srs_state.due_at.isoformat()}. "
-                        f"Use force=true to review anyway."
-                    )
-                
-                # Check cooldown (prevent rapid re-reviews)
-                if srs_state.last_reviewed_at:
-                    time_since_review = (now - srs_state.last_reviewed_at).total_seconds()
-                    if time_since_review < cooldown_seconds:
-                        raise ValueError(
-                            f"Please wait {cooldown_seconds - int(time_since_review)} more seconds before reviewing again. "
-                            f"Use force=true to bypass cooldown."
-                        )
-
-            # Calculate new SRS values
-            srs_update = self._calculate_srs_update(grade, srs_state)
-
-            if srs_state:
-                # Update existing state
-                srs_state.interval_days = srs_update["interval_days"]
-                srs_state.ease_factor = srs_update["ease_factor"]
-                srs_state.repetitions = srs_update["repetitions"]
-                srs_state.lapses = srs_update["lapses"]
-                srs_state.last_reviewed_at = now
-                if srs_update["interval_days"] > 0:
-                    srs_state.due_at = now + timedelta(days=srs_update["interval_days"])
-                else:
-                    srs_state.due_at = now  # Review again today
-            else:
-                # Create new state
-                srs_state = FlashcardSRSState(
-                    flashcard_id=flashcard_id,
-                    user_id=user_id,
-                    interval_days=srs_update["interval_days"],
-                    ease_factor=srs_update["ease_factor"],
-                    repetitions=srs_update["repetitions"],
-                    lapses=srs_update["lapses"],
-                    last_reviewed_at=now,
-                    due_at=now + timedelta(days=srs_update["interval_days"])
-                    if srs_update["interval_days"] > 0
-                    else now,
+        # Get or create SRS state
+        stmt = select(FlashcardSRSState).where(
+            (FlashcardSRSState.flashcard_id == flashcard_id)
+            & (FlashcardSRSState.user_id == user_id)
+        )
+        result = await self.db.execute(stmt)
+        srs_state = result.scalar_one_or_none()
+        
+        # Get current time (used for checks and updates)
+        now = datetime.now(timezone.utc)
+        
+        # Check if card is due (unless forced)
+        if not force and srs_state:
+            # Check due date
+            if srs_state.due_at and srs_state.due_at > now:
+                raise ValueError(
+                    f"Card not due yet. Next review: {srs_state.due_at.isoformat()}. "
+                    f"Use force=true to review anyway."
                 )
-                self.db.add(srs_state)
+            
+            # Check cooldown (prevent rapid re-reviews)
+            if srs_state.last_reviewed_at:
+                time_since_review = (now - srs_state.last_reviewed_at).total_seconds()
+                if time_since_review < cooldown_seconds:
+                    raise ValueError(
+                        f"Please wait {cooldown_seconds - int(time_since_review)} more seconds before reviewing again. "
+                        f"Use force=true to bypass cooldown."
+                    )
 
-            # Create review record
-            review = FlashcardReview(
+        # Calculate new SRS values
+        srs_update = self._calculate_srs_update(grade, srs_state)
+
+        if srs_state:
+            # Update existing state
+            srs_state.interval_days = srs_update["interval_days"]
+            srs_state.ease_factor = srs_update["ease_factor"]
+            srs_state.repetitions = srs_update["repetitions"]
+            srs_state.lapses = srs_update["lapses"]
+            srs_state.last_reviewed_at = now
+            if srs_update["interval_days"] > 0:
+                srs_state.due_at = now + timedelta(days=srs_update["interval_days"])
+            else:
+                srs_state.due_at = now  # Review again today
+        else:
+            # Create new state
+            srs_state = FlashcardSRSState(
                 flashcard_id=flashcard_id,
                 user_id=user_id,
-                rating=grade,
-                response_time_ms=response_time_ms,
+                interval_days=srs_update["interval_days"],
+                ease_factor=srs_update["ease_factor"],
+                repetitions=srs_update["repetitions"],
+                lapses=srs_update["lapses"],
+                last_reviewed_at=now,
+                due_at=now + timedelta(days=srs_update["interval_days"])
+                if srs_update["interval_days"] > 0
+                else now,
             )
-            self.db.add(review)
+            self.db.add(srs_state)
 
-            await self.db.commit()
-            await self.db.refresh(review)
-            await self.db.refresh(srs_state)
+        # Create review record
+        review = FlashcardReview(
+            flashcard_id=flashcard_id,
+            user_id=user_id,
+            rating=grade,
+            response_time_ms=response_time_ms,
+        )
+        self.db.add(review)
 
-            return review, srs_state
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while recording review: {str(e)}") from e
+        await self._commit_and_refresh(review, srs_state)
+        return review, srs_state
 

@@ -2,19 +2,19 @@
 import uuid
 from typing import Any
 
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.conversation import Conversation, ConversationMessage
+from app.services.base import BaseService
 
 
-class ConversationService:
+class ConversationService(BaseService):
     """Service for conversation operations."""
 
     def __init__(self, db: AsyncSession):
         """Initialize service with database session."""
-        self.db = db
+        super().__init__(db)
 
     async def create_conversation(
         self,
@@ -24,20 +24,15 @@ class ConversationService:
         metadata: dict[str, Any] | None = None,
     ) -> Conversation:
         """Create a new conversation."""
-        try:
-            conversation = Conversation(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                title=title,
-                metadata=metadata,
-            )
-            self.db.add(conversation)
-            await self.db.commit()
-            await self.db.refresh(conversation)
-            return conversation
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while creating conversation: {str(e)}") from e
+        conversation = Conversation(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            title=title,
+            metadata=metadata,
+        )
+        self.db.add(conversation)
+        await self._commit_and_refresh(conversation)
+        return conversation
 
     async def get_conversation(self, conversation_id: uuid.UUID) -> Conversation | None:
         """Get a conversation by ID."""
@@ -69,28 +64,22 @@ class ConversationService:
         metadata: dict[str, Any] | None = None,
     ) -> ConversationMessage:
         """Add a message to a conversation."""
-        try:
-            message = ConversationMessage(
-                conversation_id=conversation_id,
-                role=role,
-                content=content,
-                citations=citations,
-                metadata=metadata,
-            )
-            self.db.add(message)
-            
-            # Update conversation's updated_at timestamp
-            conversation = await self.get_conversation(conversation_id)
-            if conversation:
-                from sqlalchemy import func
-                conversation.updated_at = func.now()
-            
-            await self.db.commit()
-            await self.db.refresh(message)
-            return message
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while adding message: {str(e)}") from e
+        message = ConversationMessage(
+            conversation_id=conversation_id,
+            role=role,
+            content=content,
+            citations=citations,
+            metadata=metadata,
+        )
+        self.db.add(message)
+        
+        # Update conversation's updated_at timestamp
+        conversation = await self.get_conversation(conversation_id)
+        if conversation:
+            conversation.updated_at = func.now()
+        
+        await self._commit_and_refresh(message)
+        return message
 
     async def get_conversation_messages(
         self,
@@ -112,10 +101,6 @@ class ConversationService:
         if not conversation:
             raise ValueError(f"Conversation {conversation_id} not found")
         
-        try:
-            await self.db.delete(conversation)
-            await self.db.commit()
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while deleting conversation: {str(e)}") from e
+        await self.db.delete(conversation)
+        await self.db.commit()
 

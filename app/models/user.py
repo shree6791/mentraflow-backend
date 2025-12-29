@@ -62,7 +62,7 @@ class User(Base):
         "UserPreference", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
     owned_workspaces: Mapped[list["Workspace"]] = relationship(
-        "Workspace", back_populates="owner", foreign_keys="Workspace.owner_user_id"
+        "Workspace", back_populates="owner", foreign_keys="Workspace.owner_id"
     )
     workspace_memberships: Mapped[list["WorkspaceMembership"]] = relationship(
         "WorkspaceMembership", back_populates="user", cascade="all, delete-orphan"
@@ -77,7 +77,7 @@ class User(Base):
         "KGEdge", back_populates="creator", foreign_keys="KGEdge.created_by"
     )
     created_documents: Mapped[list["Document"]] = relationship(
-        "Document", back_populates="creator", foreign_keys="Document.created_by"
+        "Document", back_populates="creator", foreign_keys="Document.user_id"
     )
     flashcards: Mapped[list["Flashcard"]] = relationship(
         "Flashcard", back_populates="user", cascade="all, delete-orphan"

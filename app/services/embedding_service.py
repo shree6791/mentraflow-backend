@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from openai import AsyncOpenAI
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,18 +12,19 @@ from app.core.config import settings
 from app.infrastructure.qdrant import QdrantClientWrapper
 from app.models.document_chunk import DocumentChunk
 from app.models.embedding import Embedding
+from app.services.base import BaseService
 
 logger = logging.getLogger(__name__)
 
 
-class EmbeddingService:
+class EmbeddingService(BaseService):
     """Service for generating and storing embeddings."""
 
     def __init__(
         self, db: AsyncSession, qdrant_client: QdrantClientWrapper | None = None
     ):
         """Initialize service with database session and optional Qdrant client wrapper."""
-        self.db = db
+        super().__init__(db)
         # Use singleton QdrantClientWrapper for connection pooling
         self.qdrant_client = qdrant_client or QdrantClientWrapper()
 
@@ -93,7 +93,14 @@ class EmbeddingService:
     async def embed_chunks(
         self, document_id: uuid.UUID, embedding_model: str = "default"
     ) -> list[Embedding]:
-        """Generate embeddings for document chunks and store them."""
+        """Embed chunks for a document and store in DB + Qdrant.
+        
+        This method:
+        1. Fetches chunks from database
+        2. Generates embeddings using OpenAI
+        3. Stores embeddings in database
+        4. Upserts vectors to Qdrant
+        """
         # Get document to access workspace_id
         from app.models.document import Document
         doc_stmt = select(Document).where(Document.id == document_id)
@@ -205,26 +212,18 @@ class EmbeddingService:
                 }
             )
 
-        try:
-            # Commit embeddings to DB first (source of truth)
-            await self.db.commit()
-            for embedding in embeddings:
-                await self.db.refresh(embedding)
+        # Commit embeddings to DB first (source of truth)
+        await self._commit_and_refresh(*embeddings)
 
-            # Upsert to Qdrant using convenience method for chunks
-            if points_to_upsert and vector_size:
-                await self.qdrant_client.upsert_chunk_vectors(
-                    workspace_id=workspace_id,
-                    points=points_to_upsert,
-                )
+        # Upsert to Qdrant using convenience method for chunks
+        # Note: Qdrant errors are handled by QdrantClientWrapper
+        if points_to_upsert and vector_size:
+            await self.qdrant_client.upsert_chunk_vectors(
+                workspace_id=workspace_id,
+                points=points_to_upsert,
+            )
 
-            return embeddings
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while embedding chunks: {str(e)}") from e
-        except Exception as e:
-            await self.db.rollback()
-            raise ValueError(f"Error embedding chunks: {str(e)}") from e
+        return embeddings
 
     async def reindex_document(
         self, document_id: uuid.UUID, embedding_model: str = "default"
@@ -271,35 +270,29 @@ class EmbeddingService:
         old_embeddings_result = await self.db.execute(old_embeddings_stmt)
         old_embeddings = list(old_embeddings_result.scalars().all())
 
-        try:
-            # Delete old embeddings from Qdrant
-            if old_embeddings:
-                # Get collection name
-                collection_name = self.qdrant_client.get_collection_name("chunks")
-                
-                # Delete points by chunk IDs (point IDs = chunk IDs)
-                chunk_ids_to_delete = [str(emb.entity_id) for emb in old_embeddings]
-                if chunk_ids_to_delete:
-                    from qdrant_client.models import PointIdsList
-                    self.qdrant_client.client.delete(
-                        collection_name=collection_name,
-                        points_selector=PointIdsList(points=chunk_ids_to_delete),
-                    )
-
-            # Delete old embedding records from DB
-            for old_emb in old_embeddings:
-                await self.db.delete(old_emb)
+        # Delete old embeddings from Qdrant
+        if old_embeddings:
+            # Get collection name
+            collection_name = self.qdrant_client.get_collection_name("chunks")
             
-            await self.db.commit()
+            # Delete points by chunk IDs (point IDs = chunk IDs)
+            chunk_ids_to_delete = [str(emb.entity_id) for emb in old_embeddings]
+            if chunk_ids_to_delete:
+                from qdrant_client.models import PointIdsList
+                self.qdrant_client.client.delete(
+                    collection_name=collection_name,
+                    points_selector=PointIdsList(points=chunk_ids_to_delete),
+                )
 
-            # Regenerate embeddings (this will create new DB records and upsert to Qdrant)
-            new_embeddings = await self.embed_chunks(document_id, embedding_model)
+        # Delete old embedding records from DB
+        for old_emb in old_embeddings:
+            await self.db.delete(old_emb)
+        
+        await self.db.commit()
 
-            return new_embeddings
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while reindexing document: {str(e)}") from e
-        except Exception as e:
-            await self.db.rollback()
-            raise ValueError(f"Error reindexing document: {str(e)}") from e
+        # Regenerate embeddings (this will create new DB records and upsert to Qdrant)
+        # Note: embed_chunks handles its own error handling
+        new_embeddings = await self.embed_chunks(document_id, embedding_model)
+
+        return new_embeddings
 

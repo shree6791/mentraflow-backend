@@ -2,20 +2,20 @@
 import uuid
 from typing import Any
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.concept import Concept
 from app.models.kg_edge import KGEdge
+from app.services.base import BaseService
 
 
-class KGService:
+class KGService(BaseService):
     """Service for knowledge graph operations."""
 
     def __init__(self, db: AsyncSession):
         """Initialize service with database session."""
-        self.db = db
+        super().__init__(db)
 
     async def upsert_concepts(
         self, workspace_id: uuid.UUID, user_id: uuid.UUID, concepts: list[dict[str, Any]]
@@ -30,53 +30,43 @@ class KGService:
         result_concepts = []
         concept_names = [c["name"] for c in concepts]
 
-        try:
-            # Batch query all existing concepts at once
-            stmt = select(Concept).where(
-                (Concept.workspace_id == workspace_id) & (Concept.name.in_(concept_names))
-            )
-            existing_result = await self.db.execute(stmt)
-            existing_concepts = {c.name: c for c in existing_result.scalars().all()}
+        # Batch query all existing concepts at once
+        stmt = select(Concept).where(
+            (Concept.workspace_id == workspace_id) & (Concept.name.in_(concept_names))
+        )
+        existing_result = await self.db.execute(stmt)
+        existing_concepts = {c.name: c for c in existing_result.scalars().all()}
 
-            # Process each concept
-            for concept_data in concepts:
-                name = concept_data["name"]
-                concept = existing_concepts.get(name)
+        # Process each concept
+        for concept_data in concepts:
+            name = concept_data["name"]
+            concept = existing_concepts.get(name)
 
-                if concept:
-                    # Update existing
-                    concept.description = concept_data.get("description")
-                    concept.type = concept_data.get("type")
-                    concept.aliases = concept_data.get("aliases")
-                    concept.tags = concept_data.get("tags")
-                    concept.meta_data = concept_data.get("metadata")
-                else:
-                    # Create new
-                    concept = Concept(
-                        workspace_id=workspace_id,
-                        created_by=user_id,
-                        name=name,
-                        description=concept_data.get("description"),
-                        type=concept_data.get("type"),
-                        aliases=concept_data.get("aliases"),
-                        tags=concept_data.get("tags"),
-                        meta_data=concept_data.get("metadata"),
-                    )
-                    self.db.add(concept)
+            if concept:
+                # Update existing
+                concept.description = concept_data.get("description")
+                concept.type = concept_data.get("type")
+                concept.aliases = concept_data.get("aliases")
+                concept.tags = concept_data.get("tags")
+                concept.meta_data = concept_data.get("metadata")
+            else:
+                # Create new
+                concept = Concept(
+                    workspace_id=workspace_id,
+                    created_by=user_id,
+                    name=name,
+                    description=concept_data.get("description"),
+                    type=concept_data.get("type"),
+                    aliases=concept_data.get("aliases"),
+                    tags=concept_data.get("tags"),
+                    meta_data=concept_data.get("metadata"),
+                )
+                self.db.add(concept)
 
-                result_concepts.append(concept)
+            result_concepts.append(concept)
 
-            await self.db.commit()
-            for concept in result_concepts:
-                await self.db.refresh(concept)
-
-            return result_concepts
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while upserting concepts: {str(e)}") from e
-        except Exception as e:
-            await self.db.rollback()
-            raise ValueError(f"Error upserting concepts: {str(e)}") from e
+        await self._commit_and_refresh(*result_concepts)
+        return result_concepts
 
     async def upsert_edges(
         self, workspace_id: uuid.UUID, user_id: uuid.UUID, edges: list[dict[str, Any]]
@@ -91,54 +81,44 @@ class KGService:
 
         result_edges = []
 
-        try:
-            # For edges, we need to check uniqueness individually due to complex unique constraint
-            # But we can optimize by batching queries for edges with same src_type/dst_type
-            for edge_data in edges:
-                # Check if edge exists (by unique constraint)
-                stmt = select(KGEdge).where(
-                    (KGEdge.workspace_id == workspace_id)
-                    & (KGEdge.src_type == edge_data["src_type"])
-                    & (KGEdge.src_id == edge_data["src_id"])
-                    & (KGEdge.rel_type == edge_data["rel_type"])
-                    & (KGEdge.dst_type == edge_data["dst_type"])
-                    & (KGEdge.dst_id == edge_data["dst_id"])
+        # For edges, we need to check uniqueness individually due to complex unique constraint
+        # But we can optimize by batching queries for edges with same src_type/dst_type
+        for edge_data in edges:
+            # Check if edge exists (by unique constraint)
+            stmt = select(KGEdge).where(
+                (KGEdge.workspace_id == workspace_id)
+                & (KGEdge.src_type == edge_data["src_type"])
+                & (KGEdge.src_id == edge_data["src_id"])
+                & (KGEdge.rel_type == edge_data["rel_type"])
+                & (KGEdge.dst_type == edge_data["dst_type"])
+                & (KGEdge.dst_id == edge_data["dst_id"])
+            )
+            existing = await self.db.execute(stmt)
+            edge = existing.scalar_one_or_none()
+
+            if edge:
+                # Update existing
+                edge.weight = edge_data.get("weight")
+                edge.evidence = edge_data.get("evidence")
+            else:
+                # Create new
+                edge = KGEdge(
+                    workspace_id=workspace_id,
+                    created_by=user_id,
+                    src_type=edge_data["src_type"],
+                    src_id=edge_data["src_id"],
+                    rel_type=edge_data["rel_type"],
+                    dst_type=edge_data["dst_type"],
+                    dst_id=edge_data["dst_id"],
+                    weight=edge_data.get("weight"),
+                    evidence=edge_data.get("evidence"),
                 )
-                existing = await self.db.execute(stmt)
-                edge = existing.scalar_one_or_none()
+                self.db.add(edge)
 
-                if edge:
-                    # Update existing
-                    edge.weight = edge_data.get("weight")
-                    edge.evidence = edge_data.get("evidence")
-                else:
-                    # Create new
-                    edge = KGEdge(
-                        workspace_id=workspace_id,
-                        created_by=user_id,
-                        src_type=edge_data["src_type"],
-                        src_id=edge_data["src_id"],
-                        rel_type=edge_data["rel_type"],
-                        dst_type=edge_data["dst_type"],
-                        dst_id=edge_data["dst_id"],
-                        weight=edge_data.get("weight"),
-                        evidence=edge_data.get("evidence"),
-                    )
-                    self.db.add(edge)
+            result_edges.append(edge)
 
-                result_edges.append(edge)
-
-            await self.db.commit()
-            for edge in result_edges:
-                await self.db.refresh(edge)
-
-            return result_edges
-        except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise ValueError(f"Database error while upserting edges: {str(e)}") from e
-        except Exception as e:
-            await self.db.rollback()
-            raise ValueError(f"Error upserting edges: {str(e)}") from e
+        await self._commit_and_refresh(*result_edges)
+        return result_edges
 
     async def query_neighbors(
         self, concept_id: uuid.UUID, depth: int = 1

@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.core.qdrant_collections import ensure_collections_exist
+from app.core.qdrant_collections import ensure_collections_exist, drop_collections
 from app.api.v1.router import api_router
 from app.infrastructure.database import check_db_connection, create_tables, drop_tables
 from app.infrastructure.qdrant import check_qdrant_connection
@@ -78,13 +78,31 @@ async def lifespan(app: FastAPI):
         logger.warning("⚠️  Qdrant connection check failed - application will start but vector operations may fail")
     else:
         logger.info("✅ Qdrant connection verified")
-        # Ensure global collections exist with proper configuration
-        try:
-            await ensure_collections_exist()
-            logger.info("✅ Qdrant collections verified/created")
-        except Exception as e:
-            logger.error(f"❌ Failed to ensure Qdrant collections: {str(e)}")
-            logger.warning("⚠️  Continuing without collection setup - collections may need manual creation")
+        
+        # Optionally drop and recreate collections (development only - use with caution!)
+        drop_and_recreate_collections = os.getenv("DROP_AND_RECREATE_COLLECTIONS", "false").lower() == "true"
+        
+        if drop_and_recreate_collections:
+            logger.warning("⚠️  DROP_AND_RECREATE_COLLECTIONS=true - This will DELETE ALL VECTOR DATA!")
+            logger.warning("⚠️  Dropping all collections before recreating...")
+            try:
+                await drop_collections()
+                # Wait a moment to ensure deletion is complete
+                import asyncio
+                await asyncio.sleep(1)
+                await ensure_collections_exist()
+                logger.info("✅ Collections dropped and recreated successfully")
+            except Exception as e:
+                logger.error(f"❌ Failed to drop/recreate collections: {str(e)}", exc_info=True)
+                logger.warning("⚠️  Continuing without collection recreation")
+        else:
+            # Ensure global collections exist with proper configuration
+            try:
+                await ensure_collections_exist()
+                logger.info("✅ Qdrant collections verified/created")
+            except Exception as e:
+                logger.error(f"❌ Failed to ensure Qdrant collections: {str(e)}")
+                logger.warning("⚠️  Continuing without collection setup - collections may need manual creation")
     
     logger.info("✅ Application startup complete")
     

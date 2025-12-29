@@ -42,7 +42,7 @@ async def create_workspace(
         
         service = WorkspaceService(db)
         workspace = await service.create_workspace(
-            owner_user_id=user.id,
+            owner_id=user.id,
             name=request.name,
             plan_tier=request.plan_tier,
         )
@@ -62,13 +62,13 @@ async def create_workspace(
     summary="List workspaces",
 )
 async def list_workspaces(
-    owner_user_id: Annotated[uuid.UUID | None, Query(description="Filter by owner user ID")] = None,
+    owner_id: Annotated[uuid.UUID | None, Query(description="Filter by owner user ID")] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[WorkspaceRead]:
     """List workspaces, optionally filtered by owner."""
     try:
         service = WorkspaceService(db)
-        workspaces = await service.list_workspaces(owner_user_id=owner_user_id)
+        workspaces = await service.list_workspaces(owner_id=owner_id)
         return [WorkspaceRead.model_validate(w) for w in workspaces]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing workspaces: {str(e)}")
