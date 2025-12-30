@@ -861,10 +861,6 @@ async def create_workspace_document(
                 metadata = parsed_request.metadata or {}
                 extracted_text = parsed_request.content
                 
-                logger.info(f"Parsed JSON request - title: {doc_title}, content: {parsed_request.content[:100] if parsed_request.content else 'None'}..., content length: {len(extracted_text) if extracted_text else 0}, extracted_text type: {type(extracted_text)}")
-                
-                if not extracted_text:
-                    logger.warning(f"extracted_text is None or empty! parsed_request.content: {parsed_request.content}")
             except json.JSONDecodeError as e:
                 raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
             except Exception as e:
@@ -985,7 +981,6 @@ async def create_workspace_document(
         pref_service = UserPreferenceService(db)
         preferences = await pref_service.get_preferences(user_id=resolved_user_id)
         
-        logger.info(f"Auto-ingest preference: {preferences.auto_ingest_on_upload}, extracted_text: {bool(extracted_text)}, background_tasks: {background_tasks is not None}, agent_router: {agent_router is not None}")
         
         if preferences.auto_ingest_on_upload and extracted_text:
             if not background_tasks:
@@ -1013,7 +1008,6 @@ async def create_workspace_document(
                 await db.commit()
                 await db.refresh(document)
                 
-                logger.info(f"Created agent run {agent_run.id} for document {document.id}, adding to background tasks")
                 
                 add_agent_task(
                     background_tasks,

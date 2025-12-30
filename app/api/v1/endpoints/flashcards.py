@@ -43,46 +43,33 @@ async def list_flashcards(
         # If only document_id is provided, fetch the document to get workspace_id
         # Also verify user has access to the document/workspace
         resolved_workspace_id = workspace_id
-        if not resolved_workspace_id and document_id:
+        document = None
+        
+        if document_id:
+            # Always fetch document if document_id is provided (for access check)
             doc_stmt = select(Document).where(Document.id == document_id)
             doc_result = await db.execute(doc_stmt)
             document = doc_result.scalar_one_or_none()
             if not document:
                 raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
-            resolved_workspace_id = document.workspace_id
             
-            # Verify user has access to this document's workspace
-            # Check if user owns the document
-            if document.user_id == current_user.id:
-                pass  # User owns document, has access
-            else:
-                # Check if user owns the workspace
-                from app.models.workspace import Workspace
-                workspace_stmt = select(Workspace).where(Workspace.id == resolved_workspace_id)
-                workspace_result = await db.execute(workspace_stmt)
-                workspace = workspace_result.scalar_one_or_none()
-                if workspace and workspace.owner_id == current_user.id:
-                    pass  # User owns workspace, has access
-                else:
-                    # Check if user is a workspace member
-                    from app.models.workspace_membership import WorkspaceMembership
-                    membership_stmt = select(WorkspaceMembership).where(
-                        (WorkspaceMembership.workspace_id == resolved_workspace_id) &
-                        (WorkspaceMembership.user_id == current_user.id)
-                    )
-                    membership_result = await db.execute(membership_stmt)
-                    if not membership_result.scalar_one_or_none():
-                        raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail="You don't have permission to access flashcards for this document"
-                        )
-        elif not resolved_workspace_id:
+            # If workspace_id wasn't provided, use document's workspace_id
+            if not resolved_workspace_id:
+                resolved_workspace_id = document.workspace_id
+        
+        if not resolved_workspace_id:
             raise HTTPException(
                 status_code=400,
                 detail="Either workspace_id or document_id must be provided"
             )
+        
+        # Verify user has access - check document ownership first if document_id provided
+        has_access = False
+        if document and document.user_id == current_user.id:
+            # User owns the document, has access
+            has_access = True
         else:
-            # workspace_id provided - verify user has access to the workspace
+            # Check workspace ownership or membership
             from app.models.workspace import Workspace
             workspace_stmt = select(Workspace).where(Workspace.id == resolved_workspace_id)
             workspace_result = await db.execute(workspace_stmt)
@@ -90,8 +77,10 @@ async def list_flashcards(
             if not workspace:
                 raise HTTPException(status_code=404, detail=f"Workspace {resolved_workspace_id} not found")
             
-            # Check if user owns the workspace
-            if workspace.owner_id != current_user.id:
+            if workspace.owner_id == current_user.id:
+                # User owns workspace, has access
+                has_access = True
+            else:
                 # Check if user is a workspace member
                 from app.models.workspace_membership import WorkspaceMembership
                 membership_stmt = select(WorkspaceMembership).where(
@@ -99,11 +88,20 @@ async def list_flashcards(
                     (WorkspaceMembership.user_id == current_user.id)
                 )
                 membership_result = await db.execute(membership_stmt)
-                if not membership_result.scalar_one_or_none():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="You don't have permission to access flashcards in this workspace"
-                    )
+                if membership_result.scalar_one_or_none():
+                    # User is a workspace member, has access
+                    has_access = True
+        
+        if not has_access:
+            error_detail = "You don't have permission to access flashcards"
+            if document_id:
+                error_detail += " for this document"
+            else:
+                error_detail += " in this workspace"
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=error_detail
+            )
         
         # Only show flashcards for the authenticated user
         stmt = select(Flashcard).where(
@@ -116,6 +114,7 @@ async def list_flashcards(
         
         result = await db.execute(stmt)
         flashcards = list(result.scalars().all())
+        
         return [FlashcardRead.model_validate(f) for f in flashcards]
     except HTTPException:
         raise

@@ -17,7 +17,12 @@ class FlashcardRead(BaseModel):
     front: str | None = Field(default=None, description="Front side content (question for qa/mcq)")
     back: str | None = Field(default=None, description="Back side content (answer for qa, correct answer letter for mcq)")
     tags: list[str] | None = Field(default=None, description="Flashcard tags")
-    metadata: dict[str, Any] | None = Field(default=None, description="Additional metadata")
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Additional metadata",
+        alias="meta_data",  # Read from model's meta_data attribute
+        serialization_alias="metadata",  # Serialize as metadata in API response
+    )
     created_at: datetime = Field(description="Flashcard creation timestamp")
     updated_at: datetime = Field(description="Flashcard last update timestamp")
     
