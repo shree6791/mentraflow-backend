@@ -38,6 +38,9 @@ class User(Base):
     )
     username: Mapped[str] = mapped_column(CITEXT, unique=True, nullable=False, index=True)
     email: Mapped[str] = mapped_column(CITEXT, unique=True, nullable=False)
+    hashed_password: Mapped[str | None] = mapped_column(Text, nullable=True)  # None for Google OAuth users
+    password_reset_token: Mapped[str | None] = mapped_column(Text, nullable=True)  # JWT token for password reset
+    password_reset_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # Token expiration
     full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     timezone: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

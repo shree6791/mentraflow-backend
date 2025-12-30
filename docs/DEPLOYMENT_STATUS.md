@@ -28,6 +28,12 @@
 - [x] SSH key authentication
 - [x] Environment variables not in code
 - [x] Backend runs on localhost:8000 (frontend nginx proxies to it)
+- [x] JWT authentication (fully implemented)
+- [x] Password hashing with bcrypt
+- [x] Strong password requirements (8+ chars, uppercase, lowercase, number, special char)
+- [x] Password reset functionality
+- [x] Rate limiting on auth endpoints (prevents brute force)
+- [x] Google Sign-In token verification
 
 ---
 

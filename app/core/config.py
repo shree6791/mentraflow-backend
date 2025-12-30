@@ -134,6 +134,23 @@ class Settings(BaseSettings):
     )
 
     # ============================================================================
+    # Authentication & Security Configuration
+    # ============================================================================
+    SECRET_KEY: str = Field(
+        default="change-me-in-production-use-strong-random-key",
+        description="Secret key for JWT token signing. REQUIRED: Set a strong random key in .env!",
+    )
+    ALGORITHM: str = Field(
+        default="HS256", description="JWT algorithm (HS256 is recommended)"
+    )
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
+        default=60 * 24 * 7, description="JWT access token expiration time in minutes (default: 7 days)"
+    )
+    GOOGLE_CLIENT_ID: str = Field(
+        default="", description="Google OAuth client ID for Google Sign-In verification (optional)"
+    )
+
+    # ============================================================================
     # Pydantic Configuration
     # ============================================================================
     model_config = SettingsConfigDict(
@@ -157,6 +174,9 @@ class Settings(BaseSettings):
         "QDRANT_URL",
         "QDRANT_API_KEY",
         "QDRANT_COLLECTION_PREFIX",
+        "SECRET_KEY",
+        "ALGORITHM",
+        "GOOGLE_CLIENT_ID",
         mode="before",
     )
     @classmethod
@@ -206,6 +226,9 @@ class Settings(BaseSettings):
 
         if not self.QDRANT_API_KEY:
             errors.append("QDRANT_API_KEY is not set in .env (required for vector search)")
+
+        if self.SECRET_KEY == "change-me-in-production-use-strong-random-key":
+            errors.append("SECRET_KEY is using default value - set a strong random key in .env for production!")
 
         if self.QDRANT_URL == "http://localhost:6333":
             warnings.append("QDRANT_URL is using default localhost - is this intentional?")

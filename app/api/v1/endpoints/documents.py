@@ -23,11 +23,14 @@ from app.agents.types import (
     SummaryAgentOutput,
 )
 from app.api.dependencies import get_agent_router
+from app.core.security import get_current_user
 from app.infrastructure.database import get_db
+from app.models.user import User
 from app.schemas.common import AsyncTaskResponse, ErrorResponse
 from app.schemas.document import DocumentCreate, DocumentRead
 from app.services.agent_run_service import AgentRunService
 from app.services.document_service import DocumentService
+from app.services.workspace_service import WorkspaceService
 from app.tasks.agent_tasks import add_agent_task
 
 router = APIRouter()
@@ -37,6 +40,48 @@ def get_request_id(x_request_id: Annotated[str | None, Header()] = None) -> str:
     """Extract or generate request ID."""
     import uuid as uuid_lib
     return x_request_id or str(uuid_lib.uuid4())
+
+
+async def _verify_document_access(
+    document_id: uuid.UUID,
+    current_user: User,
+    db: AsyncSession,
+) -> None:
+    """Verify that the current user has access to a document.
+    
+    Raises HTTPException if document not found or user doesn't have access.
+    """
+    document_service = DocumentService(db)
+    document = await document_service.get_document(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    
+    # User owns the document
+    if document.user_id == current_user.id:
+        return
+    
+    # Check if user has workspace access
+    workspace_service = WorkspaceService(db)
+    workspace = await workspace_service.get_workspace(document.workspace_id)
+    if workspace and workspace.owner_id == current_user.id:
+        return
+    
+    # Check if user is a workspace member
+    from sqlalchemy import select
+    from app.models.workspace_membership import WorkspaceMembership
+    stmt = select(WorkspaceMembership).where(
+        (WorkspaceMembership.workspace_id == document.workspace_id) &
+        (WorkspaceMembership.user_id == current_user.id)
+    )
+    result = await db.execute(stmt)
+    if result.scalar_one_or_none():
+        return
+    
+    # No access
+    raise HTTPException(
+        status_code=fastapi_status.HTTP_403_FORBIDDEN,
+        detail="You don't have permission to access this document"
+    )
 
 
 async def _extract_text_from_file(file: UploadFile, file_content: bytes) -> str:
@@ -126,11 +171,11 @@ async def _extract_text_from_file(file: UploadFile, file_content: bytes) -> str:
             )
 
 
-async def _parse_json_request(http_request: Request) -> tuple[uuid.UUID, uuid.UUID, str | None, str | None, str | None, dict, str]:
+async def _parse_json_request(http_request: Request) -> tuple[uuid.UUID, str | None, str | None, str | None, dict, str]:
     """Parse JSON request body.
     
     Returns:
-        Tuple of (workspace_id, user_id, title, doc_type, source_uri, metadata, content)
+        Tuple of (workspace_id, title, doc_type, source_uri, metadata, content)
     """
     body = await http_request.json()
     request = CreateDocumentRequest(**body)
@@ -143,7 +188,6 @@ async def _parse_json_request(http_request: Request) -> tuple[uuid.UUID, uuid.UU
     
     return (
         request.workspace_id,
-        request.user_id,
         request.title,
         request.doc_type,
         request.source_url,
@@ -152,16 +196,15 @@ async def _parse_json_request(http_request: Request) -> tuple[uuid.UUID, uuid.UU
     )
 
 
-async def _parse_multipart_request(http_request: Request) -> tuple[uuid.UUID, uuid.UUID, str | None, str | None, str | None, dict, str]:
+async def _parse_multipart_request(http_request: Request) -> tuple[uuid.UUID, str | None, str | None, str | None, dict, str]:
     """Parse multipart/form-data request.
     
     Returns:
-        Tuple of (workspace_id, user_id, title, doc_type, source_uri, metadata, extracted_text)
+        Tuple of (workspace_id, title, doc_type, source_uri, metadata, extracted_text)
     """
     form = await http_request.form()
     file = form.get("file")
     workspace_id_str = form.get("workspace_id")
-    user_id_str = form.get("user_id")
     title = form.get("title")
     
     if not file:
@@ -170,19 +213,18 @@ async def _parse_multipart_request(http_request: Request) -> tuple[uuid.UUID, uu
             detail="'file' field is required for file uploads",
         )
     
-    if not workspace_id_str or not user_id_str:
+    if not workspace_id_str:
         raise HTTPException(
             status_code=400,
-            detail="workspace_id and user_id are required when uploading a file (use Form fields)",
+            detail="workspace_id is required when uploading a file (use Form field)",
         )
     
     try:
         resolved_workspace_id = uuid.UUID(str(workspace_id_str))
-        resolved_user_id = uuid.UUID(str(user_id_str))
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail="workspace_id and user_id must be valid UUIDs",
+            detail="workspace_id must be a valid UUID",
         )
     
     # Read file content
@@ -205,7 +247,6 @@ async def _parse_multipart_request(http_request: Request) -> tuple[uuid.UUID, uu
     
     return (
         resolved_workspace_id,
-        resolved_user_id,
         doc_title,
         doc_type,
         source_uri,
@@ -215,9 +256,7 @@ async def _parse_multipart_request(http_request: Request) -> tuple[uuid.UUID, uu
 
 
 class CreateDocumentRequest(DocumentCreate):
-    """Request body for creating a document (extends DocumentCreate with user_id)."""
-    
-    user_id: uuid.UUID = Field(description="User ID creating the document")
+    """Request body for creating a document (user_id comes from authenticated user)."""
 
 
 @router.post(
@@ -234,7 +273,8 @@ class CreateDocumentRequest(DocumentCreate):
 )
 async def create_document(
     http_request: Request,
-    background_tasks: BackgroundTasks = None,
+    current_user: Annotated[User, Depends(get_current_user)],
+    background_tasks: BackgroundTasks,
     agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
     request_id: Annotated[str, Depends(get_request_id)] = None,
@@ -243,9 +283,9 @@ async def create_document(
     
     Supports two modes:
     1. JSON mode: Send text content in JSON body (Content-Type: application/json)
-       - Include workspace_id, user_id, title, content, etc. in JSON
+       - Include workspace_id, title, content, etc. in JSON
     2. File upload mode: Upload a file (Content-Type: multipart/form-data)
-       - Include workspace_id, user_id, title as Form fields
+       - Include workspace_id, title as Form fields
        - Include file as File field
     
     Supported file types:
@@ -258,19 +298,16 @@ async def create_document(
         content_type = http_request.headers.get("content-type", "").lower()
         
         if "application/json" in content_type:
-            workspace_id, user_id, title, doc_type, source_uri, metadata, extracted_text = await _parse_json_request(http_request)
+            workspace_id, title, doc_type, source_uri, metadata, extracted_text = await _parse_json_request(http_request)
         elif "multipart/form-data" in content_type:
-            workspace_id, user_id, title, doc_type, source_uri, metadata, extracted_text = await _parse_multipart_request(http_request)
+            workspace_id, title, doc_type, source_uri, metadata, extracted_text = await _parse_multipart_request(http_request)
         else:
             raise HTTPException(
                 status_code=400,
                 detail="Content-Type must be either 'application/json' or 'multipart/form-data'",
             )
         
-        # Validate workspace and user exist before creating document
-        from app.services.workspace_service import WorkspaceService
-        from app.services.user_service import UserService
-        
+        # Validate workspace exists and user has access
         workspace_service = WorkspaceService(db)
         workspace = await workspace_service.get_workspace(workspace_id)
         if not workspace:
@@ -279,19 +316,29 @@ async def create_document(
                 detail=f"Workspace {workspace_id} not found. Please create a workspace first.",
             )
         
-        user_service = UserService(db)
-        user = await user_service.get_user_by_id(user_id)
-        if not user:
-            raise HTTPException(
-                status_code=404,
-                detail=f"User {user_id} not found. Please sign up first.",
+        # Verify user has access to the workspace (owner or member)
+        is_owner = workspace.owner_id == current_user.id
+        if not is_owner:
+            from sqlalchemy import select
+            from app.models.workspace_membership import WorkspaceMembership
+            
+            stmt = select(WorkspaceMembership).where(
+                (WorkspaceMembership.workspace_id == workspace_id) &
+                (WorkspaceMembership.user_id == current_user.id)
             )
+            result = await db.execute(stmt)
+            membership = result.scalar_one_or_none()
+            if not membership:
+                raise HTTPException(
+                    status_code=fastapi_status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to create documents in this workspace"
+                )
         
         # Create document with text content (service will compute hash and store content)
         document_service = DocumentService(db)
         document = await document_service.create_document(
             workspace_id=workspace_id,
-            user_id=user_id,
+            user_id=current_user.id,
             title=title,
             source_type=doc_type,
             source_uri=source_uri,
@@ -312,21 +359,21 @@ async def create_document(
         try:
             from app.services.user_preference_service import UserPreferenceService
             pref_service = UserPreferenceService(db)
-            preferences = await pref_service.get_preferences(user_id=user_id)
+            preferences = await pref_service.get_preferences(user_id=current_user.id)
             
             if preferences.auto_ingest_on_upload and extracted_text:
                 # Trigger auto-ingest in background
                 input_data = IngestionAgentInput(
                     document_id=document.id,
                     workspace_id=workspace_id,
-                    user_id=user_id,
+                    user_id=current_user.id,
                     raw_text=None,  # Already stored
                 )
                 agent_run_service = AgentRunService(db)
                 input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
                 agent_run = await agent_run_service.create_run(
                     workspace_id=workspace_id,
-                    user_id=user_id,
+                    user_id=current_user.id,
                     agent_name="ingestion",
                     input_json=input_json,
                     status="queued",
@@ -375,7 +422,6 @@ class IngestDocumentRequest(BaseModel):
     """Request body for document ingestion."""
 
     workspace_id: uuid.UUID = Field(description="Workspace ID")
-    user_id: uuid.UUID = Field(description="User ID")
     raw_text: str | None = Field(default=None, description="Optional raw text to store")
 
 
@@ -383,7 +429,6 @@ class GenerateFlashcardsRequest(BaseModel):
     """Request body for flashcard generation."""
 
     workspace_id: uuid.UUID = Field(description="Workspace ID")
-    user_id: uuid.UUID = Field(description="User ID")
     mode: str = Field(default="mcq", description="Generation mode: qa or mcq (default: mcq)")
 
 
@@ -391,7 +436,6 @@ class ExtractKGRequest(BaseModel):
     """Request body for KG extraction."""
 
     workspace_id: uuid.UUID = Field(description="Workspace ID")
-    user_id: uuid.UUID = Field(description="User ID")
 
 
 # Rate limit placeholder
@@ -420,14 +464,39 @@ async def check_rate_limit(
 async def ingest_document(
     document_id: Annotated[uuid.UUID, Path(description="Document ID to process")],
     request_body: IngestDocumentRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
     background_tasks: BackgroundTasks,
     agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
     request_id: Annotated[str, Depends(get_request_id)] = None,
 ) -> AsyncTaskResponse:
     """Ingest a document using IngestionAgent. Always runs asynchronously."""
+    # Verify user has access to the document
+    document_service = DocumentService(db)
+    document = await document_service.get_document(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    
+    # Verify user owns the document or has workspace access
+    if document.user_id != current_user.id:
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(document.workspace_id)
+        if not workspace or workspace.owner_id != current_user.id:
+            from sqlalchemy import select
+            from app.models.workspace_membership import WorkspaceMembership
+            stmt = select(WorkspaceMembership).where(
+                (WorkspaceMembership.workspace_id == document.workspace_id) &
+                (WorkspaceMembership.user_id == current_user.id)
+            )
+            result = await db.execute(stmt)
+            if not result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=fastapi_status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to ingest this document"
+                )
+    
     # Rate limit check (placeholder)
-    await check_rate_limit(request_body.workspace_id, request_body.user_id, request_id)
+    await check_rate_limit(request_body.workspace_id, current_user.id, request_id)
 
     # Idempotency check: prevent duplicate ingestion runs
     document_service = DocumentService(db)
@@ -459,7 +528,7 @@ async def ingest_document(
     input_data = IngestionAgentInput(
         document_id=document_id,
         workspace_id=request_body.workspace_id,
-        user_id=request_body.user_id,
+        user_id=current_user.id,
         raw_text=request_body.raw_text,
     )
 
@@ -469,7 +538,7 @@ async def ingest_document(
         input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
         agent_run = await agent_run_service.create_run(
             workspace_id=request_body.workspace_id,
-            user_id=request_body.user_id,
+            user_id=current_user.id,
             agent_name="ingestion",
             input_json=input_json,
             status="queued",
@@ -511,14 +580,38 @@ async def ingest_document(
 async def generate_flashcards(
     document_id: Annotated[uuid.UUID, Path(description="Source document ID")],
     request_body: GenerateFlashcardsRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
     background_tasks: BackgroundTasks,
     agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
     request_id: Annotated[str, Depends(get_request_id)] = None,
 ) -> AsyncTaskResponse:
     """Generate flashcards from a document using FlashcardAgent. Always runs asynchronously."""
+    # Verify user has access to the document
+    document_service = DocumentService(db)
+    document = await document_service.get_document(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    
+    if document.user_id != current_user.id:
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(document.workspace_id)
+        if not workspace or workspace.owner_id != current_user.id:
+            from sqlalchemy import select
+            from app.models.workspace_membership import WorkspaceMembership
+            stmt = select(WorkspaceMembership).where(
+                (WorkspaceMembership.workspace_id == document.workspace_id) &
+                (WorkspaceMembership.user_id == current_user.id)
+            )
+            result = await db.execute(stmt)
+            if not result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=fastapi_status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to generate flashcards from this document"
+                )
+    
     # Rate limit check (placeholder)
-    await check_rate_limit(request_body.workspace_id, request_body.user_id, request_id)
+    await check_rate_limit(request_body.workspace_id, current_user.id, request_id)
 
     # Validate mode
     from app.core.constants import FLASHCARD_MODE_TO_CARD_TYPE, FLASHCARD_MODES
@@ -536,7 +629,7 @@ async def generate_flashcards(
     flashcard_service = FlashcardService(db)
     existing_flashcards = await flashcard_service.find_existing_flashcards(
         workspace_id=request_body.workspace_id,
-        user_id=request_body.user_id,
+        user_id=current_user.id,
         document_id=document_id,
         card_type=card_type,
         limit=10,
@@ -549,7 +642,7 @@ async def generate_flashcards(
     # Create input
     input_data = FlashcardAgentInput(
         workspace_id=request_body.workspace_id,
-        user_id=request_body.user_id,
+        user_id=current_user.id,
         source_document_id=document_id,
         mode=request_body.mode,
     )
@@ -560,7 +653,7 @@ async def generate_flashcards(
         input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
         agent_run = await agent_run_service.create_run(
             workspace_id=request_body.workspace_id,
-            user_id=request_body.user_id,
+            user_id=current_user.id,
             agent_name="flashcard",
             input_json=input_json,
             status="queued",
@@ -602,19 +695,43 @@ async def generate_flashcards(
 async def extract_kg(
     document_id: Annotated[uuid.UUID, Path(description="Source document ID")],
     request_body: ExtractKGRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
     background_tasks: BackgroundTasks,
     agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
     request_id: Annotated[str, Depends(get_request_id)] = None,
 ) -> AsyncTaskResponse:
     """Extract knowledge graph from a document using KGExtractionAgent. Always runs asynchronously."""
+    # Verify user has access to the document
+    document_service = DocumentService(db)
+    document = await document_service.get_document(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    
+    if document.user_id != current_user.id:
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(document.workspace_id)
+        if not workspace or workspace.owner_id != current_user.id:
+            from sqlalchemy import select
+            from app.models.workspace_membership import WorkspaceMembership
+            stmt = select(WorkspaceMembership).where(
+                (WorkspaceMembership.workspace_id == document.workspace_id) &
+                (WorkspaceMembership.user_id == current_user.id)
+            )
+            result = await db.execute(stmt)
+            if not result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=fastapi_status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to extract KG from this document"
+                )
+    
     # Rate limit check (placeholder)
-    await check_rate_limit(request_body.workspace_id, request_body.user_id, request_id)
+    await check_rate_limit(request_body.workspace_id, current_user.id, request_id)
 
     # Create input
     input_data = KGExtractionAgentInput(
         workspace_id=request_body.workspace_id,
-        user_id=request_body.user_id,
+        user_id=current_user.id,
         source_document_id=document_id,
     )
 
@@ -624,7 +741,7 @@ async def extract_kg(
         input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
         agent_run = await agent_run_service.create_run(
             workspace_id=request_body.workspace_id,
-            user_id=request_body.user_id,
+            user_id=current_user.id,
             agent_name="kg_extraction",
             input_json=input_json,
             status="queued",
@@ -664,18 +781,19 @@ async def extract_kg(
 )
 async def create_workspace_document(
     workspace_id: Annotated[uuid.UUID, Path(description="Workspace ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
+    background_tasks: BackgroundTasks,
+    http_request: Request,
     # For JSON requests (text content)
     request: Annotated[CreateDocumentRequest | None, Body()] = None,
     # For file uploads (multipart/form-data)
     file: Annotated[UploadFile | None, File(description="File to upload (PDF, DOC, TXT, MD, etc.)")] = None,
-    user_id: Annotated[uuid.UUID | None, Form(description="User ID (required for file uploads)")] = None,
     title: Annotated[str | None, Form(description="Document title (optional for file uploads)")] = None,
-    background_tasks: BackgroundTasks = None,
     agent_router: Annotated[AgentRouter, Depends(get_agent_router)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
     request_id: Annotated[str, Depends(get_request_id)] = None,
 ) -> DocumentRead:
-    """Create a document in a workspace.
+    """Create a document in a workspace. Only accessible by workspace members.
     
     Supports two modes:
     1. JSON mode: Send text content in JSON body (Content-Type: application/json)
@@ -686,24 +804,75 @@ async def create_workspace_document(
     - DOC/DOCX (.doc, .docx) - extracts text (requires python-docx)
     - Text files (.txt, .md, etc.) - read directly
     """
+    # Verify user has access to the workspace
+    workspace_service = WorkspaceService(db)
+    workspace = await workspace_service.get_workspace(workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+    
+    is_owner = workspace.owner_id == current_user.id
+    if not is_owner:
+        from sqlalchemy import select
+        from app.models.workspace_membership import WorkspaceMembership
+        stmt = select(WorkspaceMembership).where(
+            (WorkspaceMembership.workspace_id == workspace_id) &
+            (WorkspaceMembership.user_id == current_user.id)
+        )
+        result = await db.execute(stmt)
+        if not result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=fastapi_status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to create documents in this workspace"
+            )
+    
     try:
         extracted_text = None
         doc_title = None
         doc_type = None
         source_uri = None
         metadata = {}
-        resolved_user_id = None
+        resolved_user_id = current_user.id  # Always use authenticated user
+        
+        # Check content type to determine mode
+        content_type = http_request.headers.get("content-type", "").lower()
         
         # Determine mode: file upload or JSON text
-        if file:
+        # If JSON, manually parse the body since File() parameter might interfere with FastAPI's automatic parsing
+        parsed_request = None
+        if "application/json" in content_type:
+            # Manually parse JSON body (FastAPI might not parse it when File() parameter is present)
+            try:
+                import json
+                body = await http_request.body()
+                json_data = json.loads(body.decode("utf-8"))
+                # Create request object from JSON
+                parsed_request = CreateDocumentRequest(**json_data)
+                # Also set request for compatibility
+                request = parsed_request
+                
+                # Set extracted_text from parsed request immediately
+                if parsed_request.workspace_id != workspace_id:
+                    raise HTTPException(status_code=400, detail="Workspace ID mismatch")
+                
+                resolved_user_id = current_user.id
+                doc_title = parsed_request.title
+                doc_type = parsed_request.doc_type
+                source_uri = parsed_request.source_url
+                metadata = parsed_request.metadata or {}
+                extracted_text = parsed_request.content
+                
+                logger.info(f"Parsed JSON request - title: {doc_title}, content: {parsed_request.content[:100] if parsed_request.content else 'None'}..., content length: {len(extracted_text) if extracted_text else 0}, extracted_text type: {type(extracted_text)}")
+                
+                if not extracted_text:
+                    logger.warning(f"extracted_text is None or empty! parsed_request.content: {parsed_request.content}")
+            except json.JSONDecodeError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Error parsing JSON body: {str(e)}")
+        
+        elif "multipart/form-data" in content_type and file:
             # File upload mode
-            if not user_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="user_id is required when uploading a file (use Form field)",
-                )
-            
-            resolved_user_id = user_id
+            resolved_user_id = current_user.id
             doc_title = title or file.filename or "Uploaded Document"
             
             # Read file content
@@ -789,22 +958,11 @@ async def create_workspace_document(
                     detail="File appears to be empty or contains no extractable text",
                 )
         
-        elif request:
-            # JSON text mode
-            if request.workspace_id != workspace_id:
-                raise HTTPException(status_code=400, detail="Workspace ID mismatch")
-            
-            resolved_user_id = request.user_id
-            doc_title = request.title
-            doc_type = request.doc_type
-            source_uri = request.source_url
-            metadata = request.metadata or {}
-            extracted_text = request.content
-        
-        else:
+        elif not parsed_request:
+            # Neither JSON nor file upload was processed
             raise HTTPException(
                 status_code=400,
-                detail="Either provide 'file' (multipart/form-data) or JSON body with 'content' field",
+                detail="Either provide 'file' (multipart/form-data) or JSON body with 'content' field. Content-Type must be 'application/json' for JSON or 'multipart/form-data' for file upload.",
             )
         
         # Create document
@@ -827,34 +985,44 @@ async def create_workspace_document(
         pref_service = UserPreferenceService(db)
         preferences = await pref_service.get_preferences(user_id=resolved_user_id)
         
+        logger.info(f"Auto-ingest preference: {preferences.auto_ingest_on_upload}, extracted_text: {bool(extracted_text)}, background_tasks: {background_tasks is not None}, agent_router: {agent_router is not None}")
+        
         if preferences.auto_ingest_on_upload and extracted_text:
-            # Trigger auto-ingest in background
-            input_data = IngestionAgentInput(
-                document_id=document.id,
-                workspace_id=workspace_id,
-                user_id=resolved_user_id,
-                raw_text=None,  # Already stored
-            )
-            agent_run_service = AgentRunService(db)
-            input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
-            agent_run = await agent_run_service.create_run(
-                workspace_id=workspace_id,
-                user_id=resolved_user_id,
-                agent_name="ingestion",
-                input_json=input_json,
-                status="queued",
-            )
-            document.last_run_id = agent_run.id
-            await db.commit()
-            
-            add_agent_task(
-                background_tasks,
-                "ingestion",
-                agent_router.run_ingestion,
-                input_data,
-                agent_run.id,
-                db,
-            )
+            if not background_tasks:
+                logger.error("background_tasks is None, cannot trigger auto-ingest")
+            elif not agent_router:
+                logger.error("agent_router is None, cannot trigger auto-ingest")
+            else:
+                # Trigger auto-ingest in background
+                input_data = IngestionAgentInput(
+                    document_id=document.id,
+                    workspace_id=workspace_id,
+                    user_id=resolved_user_id,
+                    raw_text=None,  # Already stored
+                )
+                agent_run_service = AgentRunService(db)
+                input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
+                agent_run = await agent_run_service.create_run(
+                    workspace_id=workspace_id,
+                    user_id=resolved_user_id,
+                    agent_name="ingestion",
+                    input_json=input_json,
+                    status="queued",
+                )
+                document.last_run_id = agent_run.id
+                await db.commit()
+                await db.refresh(document)
+                
+                logger.info(f"Created agent run {agent_run.id} for document {document.id}, adding to background tasks")
+                
+                add_agent_task(
+                    background_tasks,
+                    "ingestion",
+                    agent_router.run_ingestion,
+                    input_data,
+                    agent_run.id,
+                    db,
+                )
         
         return DocumentRead.model_validate(document)
     except HTTPException:
@@ -876,10 +1044,32 @@ async def create_workspace_document(
 )
 async def list_workspace_documents(
     workspace_id: Annotated[uuid.UUID, Path(description="Workspace ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[DocumentRead]:
-    """List all documents in a workspace."""
+    """List all documents in a workspace. Only accessible by workspace members."""
     try:
+        # Verify user has access to the workspace
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+        
+        is_owner = workspace.owner_id == current_user.id
+        if not is_owner:
+            from sqlalchemy import select
+            from app.models.workspace_membership import WorkspaceMembership
+            stmt = select(WorkspaceMembership).where(
+                (WorkspaceMembership.workspace_id == workspace_id) &
+                (WorkspaceMembership.user_id == current_user.id)
+            )
+            result = await db.execute(stmt)
+            if not result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=fastapi_status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to list documents in this workspace"
+                )
+        
         document_service = DocumentService(db)
         documents = await document_service.list_documents(workspace_id=workspace_id)
         return [DocumentRead.model_validate(d) for d in documents]
@@ -895,14 +1085,14 @@ async def list_workspace_documents(
 )
 async def get_document(
     document_id: Annotated[uuid.UUID, Path(description="Document ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> DocumentRead:
-    """Get a document by ID (includes status, summary_text, last_run_id)."""
+    """Get a document by ID (includes status, summary_text, last_run_id). Only accessible by document owner or workspace members."""
+    await _verify_document_access(document_id, current_user, db)
     try:
         document_service = DocumentService(db)
         document = await document_service.get_document(document_id)
-        if not document:
-            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
         return DocumentRead.model_validate(document)
     except HTTPException:
         raise
@@ -919,11 +1109,23 @@ async def get_document(
 async def update_document(
     document_id: Annotated[uuid.UUID, Path(description="Document ID")],
     request: DocumentCreate,  # Reuse for partial update
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> DocumentRead:
-    """Update a document."""
+    """Update a document. Only accessible by document owner."""
+    # Verify user owns the document (not just workspace access)
+    document_service = DocumentService(db)
+    document = await document_service.get_document(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    
+    if document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=fastapi_status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to update this document"
+        )
+    
     try:
-        document_service = DocumentService(db)
         document = await document_service.update_document(
             document_id=document_id,
             title=request.title,
@@ -947,11 +1149,23 @@ async def update_document(
 )
 async def delete_document(
     document_id: Annotated[uuid.UUID, Path(description="Document ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> None:
-    """Delete a document (cascade deletes chunks, embeddings, etc.)."""
+    """Delete a document (cascade deletes chunks, embeddings, etc.). Only accessible by document owner."""
+    # Verify user owns the document (not just workspace access)
+    document_service = DocumentService(db)
+    document = await document_service.get_document(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    
+    if document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=fastapi_status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to delete this document"
+        )
+    
     try:
-        document_service = DocumentService(db)
         await document_service.delete_document(document_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -967,10 +1181,11 @@ async def delete_document(
 )
 async def get_document_status(
     document_id: Annotated[uuid.UUID, Path(description="Document ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> DocumentRead:
     """Get document status (alias to document GET)."""
-    return await get_document(document_id, db)
+    return await get_document(document_id, current_user, db)
 
 
 @router.get(
@@ -980,14 +1195,14 @@ async def get_document_status(
 )
 async def get_document_summary(
     document_id: Annotated[uuid.UUID, Path(description="Document ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> dict:
-    """Get document summary."""
+    """Get document summary. Only accessible by document owner or workspace members."""
+    await _verify_document_access(document_id, current_user, db)
     try:
         document_service = DocumentService(db)
         document = await document_service.get_document(document_id)
-        if not document:
-            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
         return {"summary": document.summary_text, "document_id": str(document_id)}
     except HTTPException:
         raise
@@ -1007,6 +1222,7 @@ async def get_document_summary(
 )
 async def regenerate_document_summary(
     document_id: Annotated[uuid.UUID, Path(description="Document ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     background_tasks: BackgroundTasks,
     max_bullets: Annotated[
         int,
@@ -1020,19 +1236,18 @@ async def regenerate_document_summary(
     db: Annotated[AsyncSession, Depends(get_db)] = None,
     request_id: Annotated[str, Depends(get_request_id)] = None,
 ) -> AsyncTaskResponse:
-    """Regenerate document summary using SummaryAgent. Always runs asynchronously."""
+    """Regenerate document summary using SummaryAgent. Always runs asynchronously. Only accessible by document owner or workspace members."""
+    await _verify_document_access(document_id, current_user, db)
     try:
-        # Get document to extract workspace_id and user_id
+        # Get document to extract workspace_id
         document_service = DocumentService(db)
         document = await document_service.get_document(document_id)
-        if not document:
-            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
         
         # Create input
         input_data = SummaryAgentInput(
             document_id=document_id,
             workspace_id=document.workspace_id,
-            user_id=document.user_id,  # Use document user_id
+            user_id=current_user.id,
             max_bullets=max_bullets,
         )
 
@@ -1042,7 +1257,7 @@ async def regenerate_document_summary(
             input_json = input_data.model_dump(mode='json')  # Convert UUIDs to strings for JSON serialization
             agent_run = await agent_run_service.create_run(
                 workspace_id=document.workspace_id,
-                user_id=document.user_id,
+                user_id=current_user.id,
                 agent_name="summary",
                 input_json=input_json,
                 status="queued",
@@ -1087,10 +1302,11 @@ async def regenerate_document_summary(
 )
 async def reindex_document(
     document_id: Annotated[uuid.UUID, Path(description="Document ID to reindex")],
+    current_user: Annotated[User, Depends(get_current_user)],
     embedding_model: Annotated[str, Query(description="Embedding model to use")] = "default",
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> dict:
-    """Reindex document embeddings.
+    """Reindex document embeddings. Only accessible by document owner.
     
     This endpoint:
     - Deletes old embeddings from Qdrant (by document_id filter)
@@ -1100,14 +1316,21 @@ async def reindex_document(
     
     Chunk IDs remain stable, ensuring chat and other features continue to work.
     """
+    # Verify user owns the document
+    document_service = DocumentService(db)
+    document = await document_service.get_document(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    
+    if document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=fastapi_status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to reindex this document"
+        )
+    
     try:
         from app.services.embedding_service import EmbeddingService
         from app.infrastructure.qdrant import QdrantClientWrapper
-        
-        document_service = DocumentService(db)
-        document = await document_service.get_document(document_id)
-        if not document:
-            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
         
         # Reindex embeddings
         qdrant_client = QdrantClientWrapper()

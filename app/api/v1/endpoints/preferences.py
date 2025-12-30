@@ -13,7 +13,9 @@ from app.core.constants import (
     DEFAULT_AUTO_SUMMARY_AFTER_INGEST,
     DEFAULT_FLASHCARD_MODE,
 )
+from app.core.security import get_current_user
 from app.infrastructure.database import get_db
+from app.models.user import User
 from app.schemas.common import ErrorResponse
 from app.services.user_preference_service import UserPreferenceService
 
@@ -56,14 +58,14 @@ class PreferenceUpdate(BaseModel):
     summary="Get user preferences",
 )
 async def get_preferences(
-    user_id: Annotated[uuid.UUID, Query(description="User ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     workspace_id: Annotated[uuid.UUID | None, Query(description="Workspace ID (optional)")] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> PreferenceRead:
-    """Get user preferences, creating defaults if not exists."""
+    """Get user preferences for the authenticated user, creating defaults if not exists."""
     try:
         service = UserPreferenceService(db)
-        preference = await service.get_preferences(user_id=user_id, workspace_id=workspace_id)
+        preference = await service.get_preferences(user_id=current_user.id, workspace_id=workspace_id)
         return PreferenceRead(
             user_id=preference.user_id,
             auto_ingest_on_upload=preference.auto_ingest_on_upload,
@@ -84,15 +86,15 @@ async def get_preferences(
 )
 async def update_preferences(
     request: PreferenceUpdate,
-    user_id: Annotated[uuid.UUID, Query(description="User ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     workspace_id: Annotated[uuid.UUID | None, Query(description="Workspace ID (optional)")] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> PreferenceRead:
-    """Update user preferences."""
+    """Update user preferences for the authenticated user."""
     try:
         service = UserPreferenceService(db)
         preference = await service.update_preferences(
-            user_id=user_id,
+            user_id=current_user.id,
             auto_ingest_on_upload=request.auto_ingest_on_upload,
             auto_summary_after_ingest=request.auto_summary_after_ingest,
             auto_flashcards_after_ingest=request.auto_flashcards_after_ingest,

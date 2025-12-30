@@ -50,7 +50,7 @@ class KGExtractionAgent(BaseAgent[KGExtractionAgentInput, KGExtractionAgentOutpu
         """Internal run method using LangGraph."""
         input_data = self._current_input
 
-        # Initialize state (includes service_tools, llm, and system_prompt for graph nodes)
+        # Initialize state (includes service_tools, llm, db, and system_prompt for graph nodes)
         from app.agents.graphs.kg_graph import KGExtractionState
         initial_state: KGExtractionState = {
             "input_data": input_data,
@@ -70,6 +70,7 @@ class KGExtractionAgent(BaseAgent[KGExtractionAgentInput, KGExtractionAgentOutpu
             "service_tools": self.service_tools,
             "llm": self.llm,
             "system_prompt": self.system_prompt,
+            "db": self.db,  # Add db for fallback chunk retrieval
         }
 
         # Run graph

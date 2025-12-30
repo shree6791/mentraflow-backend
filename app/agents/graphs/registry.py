@@ -106,8 +106,9 @@ class GraphRegistry:
             Compiled LangGraph instance
         """
         if self._kg_extraction_graph is None:
+            # db is passed for consistency but not stored in graph (it's in state per request)
             self._kg_extraction_graph = build_kg_extraction_graph(
-                service_tools, self.llm, self.kg_prompt
+                service_tools, self.llm, self.kg_prompt, db
             )
         return self._kg_extraction_graph
 

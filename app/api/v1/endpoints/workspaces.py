@@ -2,10 +2,12 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import get_current_user
 from app.infrastructure.database import get_db
+from app.models.user import User
 from app.schemas.common import ErrorResponse
 from app.schemas.workspace import WorkspaceCreate, WorkspaceRead
 from app.services.workspace_service import WorkspaceService
@@ -22,27 +24,14 @@ router = APIRouter()
 )
 async def create_workspace(
     request: WorkspaceCreate,
-    owner_username: Annotated[str, Query(description="Owner username")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceRead:
-    """Create a new workspace.
-    
-    The owner is identified by username (e.g., "shree6791").
-    """
+    """Create a new workspace for the authenticated user."""
     try:
-        # Look up user by username
-        from app.services.user_service import UserService
-        user_service = UserService(db)
-        user = await user_service.get_user_by_username(owner_username)
-        if not user:
-            raise HTTPException(
-                status_code=404,
-                detail=f"User with username '{owner_username}' not found. Please sign up first.",
-            )
-        
         service = WorkspaceService(db)
         workspace = await service.create_workspace(
-            owner_id=user.id,
+            owner_id=current_user.id,
             name=request.name,
             plan_tier=request.plan_tier,
         )
@@ -62,13 +51,14 @@ async def create_workspace(
     summary="List workspaces",
 )
 async def list_workspaces(
-    owner_id: Annotated[uuid.UUID | None, Query(description="Filter by owner user ID")] = None,
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[WorkspaceRead]:
-    """List workspaces, optionally filtered by owner."""
+    """List workspaces for the authenticated user."""
     try:
         service = WorkspaceService(db)
-        workspaces = await service.list_workspaces(owner_id=owner_id)
+        # Only show workspaces owned by the authenticated user
+        workspaces = await service.list_workspaces(owner_id=current_user.id)
         return [WorkspaceRead.model_validate(w) for w in workspaces]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing workspaces: {str(e)}")
@@ -82,14 +72,23 @@ async def list_workspaces(
 )
 async def get_workspace(
     workspace_id: Annotated[uuid.UUID, Path(description="Workspace ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceRead:
-    """Get a workspace by ID."""
+    """Get a workspace by ID. Only accessible by the workspace owner."""
     try:
         service = WorkspaceService(db)
         workspace = await service.get_workspace(workspace_id)
         if not workspace:
             raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+        
+        # Authorization check: ensure user owns the workspace
+        if workspace.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this workspace"
+            )
+        
         return WorkspaceRead.model_validate(workspace)
     except HTTPException:
         raise
@@ -106,11 +105,23 @@ async def get_workspace(
 async def update_workspace(
     workspace_id: Annotated[uuid.UUID, Path(description="Workspace ID")],
     request: WorkspaceCreate,  # Reuse for partial update
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceRead:
-    """Update a workspace."""
+    """Update a workspace. Only accessible by the workspace owner."""
     try:
         service = WorkspaceService(db)
+        workspace = await service.get_workspace(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+        
+        # Authorization check: ensure user owns the workspace
+        if workspace.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to update this workspace"
+            )
+        
         workspace = await service.update_workspace(
             workspace_id=workspace_id,
             name=request.name,
@@ -131,11 +142,23 @@ async def update_workspace(
 )
 async def delete_workspace(
     workspace_id: Annotated[uuid.UUID, Path(description="Workspace ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Delete a workspace (cascade deletes all related data)."""
+    """Delete a workspace (cascade deletes all related data). Only accessible by the workspace owner."""
     try:
         service = WorkspaceService(db)
+        workspace = await service.get_workspace(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+        
+        # Authorization check: ensure user owns the workspace
+        if workspace.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to delete this workspace"
+            )
+        
         await service.delete_workspace(workspace_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

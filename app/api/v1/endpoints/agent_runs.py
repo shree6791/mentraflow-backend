@@ -2,11 +2,13 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import get_current_user
 from app.infrastructure.database import get_db
+from app.models.user import User
 from app.schemas.common import ErrorResponse
 from app.services.agent_run_service import AgentRunService
 
@@ -39,9 +41,10 @@ class AgentRunRead(BaseModel):
 )
 async def get_agent_run(
     run_id: Annotated[uuid.UUID, Path(description="Agent run ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AgentRunRead:
-    """Get an agent run by ID."""
+    """Get an agent run by ID. Only accessible by the run owner."""
     try:
         from sqlalchemy import select
         from app.models.agent_run import AgentRun
@@ -51,6 +54,14 @@ async def get_agent_run(
         agent_run = result.scalar_one_or_none()
         if not agent_run:
             raise HTTPException(status_code=404, detail=f"Agent run {run_id} not found")
+        
+        # Authorization check: ensure user owns the agent run
+        if agent_run.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this agent run"
+            )
+        
         return AgentRunRead.model_validate(agent_run)
     except HTTPException:
         raise
@@ -65,24 +76,23 @@ async def get_agent_run(
     summary="List agent runs",
 )
 async def list_agent_runs(
+    current_user: Annotated[User, Depends(get_current_user)],
     workspace_id: Annotated[uuid.UUID | None, Query(description="Filter by workspace ID")] = None,
-    user_id: Annotated[uuid.UUID | None, Query(description="Filter by user ID")] = None,
     agent_name: Annotated[str | None, Query(description="Filter by agent name")] = None,
     status: Annotated[str | None, Query(description="Filter by status")] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Maximum number of results")] = 20,
     offset: Annotated[int, Query(ge=0, description="Offset for pagination")] = 0,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[AgentRunRead]:
-    """List agent runs, optionally filtered by workspace, user, agent, or status."""
+    """List agent runs for the authenticated user, optionally filtered by workspace, agent, or status."""
     try:
         from sqlalchemy import select
         from app.models.agent_run import AgentRun
         
-        stmt = select(AgentRun)
+        # Only show agent runs for the authenticated user
+        stmt = select(AgentRun).where(AgentRun.user_id == current_user.id)
         if workspace_id:
             stmt = stmt.where(AgentRun.workspace_id == workspace_id)
-        if user_id:
-            stmt = stmt.where(AgentRun.user_id == user_id)
         if agent_name:
             stmt = stmt.where(AgentRun.agent_name == agent_name)
         if status:

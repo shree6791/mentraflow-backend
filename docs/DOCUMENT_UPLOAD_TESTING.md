@@ -17,13 +17,13 @@ This guide walks you through testing the document upload flow using the MentraFl
    ```
 
 3. **Have Credentials Ready**: You'll need:
-   - A `username` (create via signup)
-   - A `workspace_id` (create one first using username)
-   - A `user_id` (UUID - get it by username or from signup response)
+   - A user account (create via signup)
+   - A JWT access token (from signup/login response)
+   - A `workspace_id` (create one first after login)
 
 ---
 
-## Step 1: Create User (if you don't have one)
+## Step 1: Create User and Get Access Token
 
 **Endpoint:** `POST /api/v1/auth/signup`
 
@@ -33,29 +33,53 @@ curl -X POST "http://localhost:8000/api/v1/auth/signup" \
   -d '{
     "username": "testuser",
     "email": "test@example.com",
-    "password": "securepassword",
+    "password": "SecurePass123!",
     "full_name": "Test User"
   }'
 ```
 
-**Save the `username` from response → `USERNAME`**
+**Password Requirements:**
+- Minimum 8 characters
+- At least one uppercase letter
+- At least one lowercase letter
+- At least one number
+- At least one special character
 
-**To get user_id by username:**
-```bash
-curl "http://localhost:8000/api/v1/users/by-username/testuser"
+**Save the `access_token` from response → `ACCESS_TOKEN`**
+
+**Example Response:**
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440001",
+  "username": "testuser",
+  "email": "test@example.com",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
 ```
 
-**Save the `user_id` from response → `USER_ID`**
+**Or login if you already have an account:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test@example.com",
+    "password": "SecurePass123!"
+  }'
+```
 
 ---
 
 ## Step 2: Create a Workspace (if you don't have one)
 
-**Endpoint:** `POST /api/v1/workspaces?owner_username={username}`
+**Endpoint:** `POST /api/v1/workspaces`
+
+**Note:** All endpoints now require JWT authentication. Include the access token in the Authorization header.
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/workspaces?owner_username=testuser" \
+curl -X POST "http://localhost:8000/api/v1/workspaces" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -d '{
     "name": "Test Workspace",
     "plan_tier": "free"
@@ -83,14 +107,15 @@ The unified endpoint `POST /api/v1/documents` supports **two modes**:
 
 ### Option A: Create Document with Text Content (JSON)
 
-**Endpoint:** `POST /api/v1/documents` (Content-Type: `application/json`)
+**Endpoint:** `POST /api/v1/workspaces/{workspace_id}/documents` (Content-Type: `application/json`)
+
+**Note:** The `user_id` is automatically obtained from the JWT token. You only need to provide `workspace_id` in the URL.
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents" \
+curl -X POST "http://localhost:8000/api/v1/workspaces/YOUR_WORKSPACE_ID/documents" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -d '{
-    "workspace_id": "YOUR_WORKSPACE_ID",
-    "user_id": "YOUR_USER_ID",
     "title": "Introduction to Machine Learning",
     "doc_type": "text",
     "content": "Machine learning is a subset of artificial intelligence that focuses on algorithms that can learn from data. It enables computers to improve their performance on a task through experience without being explicitly programmed for every scenario. There are three main types of machine learning: supervised learning, unsupervised learning, and reinforcement learning. Supervised learning uses labeled data to train models, while unsupervised learning finds patterns in unlabeled data. Reinforcement learning involves training agents to make decisions through trial and error.",
@@ -121,24 +146,24 @@ curl -X POST "http://localhost:8000/api/v1/documents" \
 
 ### Option B: Upload File (Multipart Form Data)
 
-**Endpoint:** `POST /api/v1/documents` (Content-Type: `multipart/form-data`)
+**Endpoint:** `POST /api/v1/workspaces/{workspace_id}/documents` (Content-Type: `multipart/form-data`)
 
 **Supported file types:** PDF (.pdf), DOC/DOCX (.doc, .docx), TXT (.txt), MD (.md)
 
+**Note:** The `user_id` is automatically obtained from the JWT token. You only need to provide `workspace_id` in the URL.
+
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents" \
+curl -X POST "http://localhost:8000/api/v1/workspaces/YOUR_WORKSPACE_ID/documents" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "file=@/path/to/your/document.pdf" \
-  -F "workspace_id=YOUR_WORKSPACE_ID" \
-  -F "user_id=YOUR_USER_ID" \
   -F "title=My Study Document"
 ```
 
 **Or with a text file:**
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents" \
+curl -X POST "http://localhost:8000/api/v1/workspaces/YOUR_WORKSPACE_ID/documents" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "file=@/path/to/your/document.txt" \
-  -F "workspace_id=YOUR_WORKSPACE_ID" \
-  -F "user_id=YOUR_USER_ID" \
   -F "title=My Study Document"
 ```
 
@@ -155,7 +180,8 @@ curl -X POST "http://localhost:8000/api/v1/documents" \
 **Endpoint:** `GET /api/v1/documents/{document_id}`
 
 ```bash
-curl "http://localhost:8000/api/v1/documents/YOUR_DOCUMENT_ID"
+curl -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  "http://localhost:8000/api/v1/documents/YOUR_DOCUMENT_ID"
 ```
 
 **Status Values:**
@@ -200,18 +226,26 @@ WORKSPACE_ID=""  # Will be set after workspace creation
 echo "🚀 Testing Document Upload Flow"
 echo "================================"
 
-# Step 1: Get User ID by Username
+# Step 1: Signup/Login and Get Access Token
 echo ""
-echo "Step 1: Getting user ID by username..."
-USER_RESPONSE=$(curl -s "${BASE_URL}/api/v1/users/by-username/${USERNAME}")
-USER_ID=$(echo $USER_RESPONSE | grep -o '"user_id":"[^"]*' | cut -d'"' -f4)
-echo "✅ User ID: ${USER_ID}"
+echo "Step 1: Signing up..."
+SIGNUP_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/v1/auth/signup" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "testuser",
+    "email": "test@example.com",
+    "password": "SecurePass123!",
+    "full_name": "Test User"
+  }')
+ACCESS_TOKEN=$(echo $SIGNUP_RESPONSE | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
+echo "✅ Access token obtained"
 
 # Step 2: Create Workspace
 echo ""
 echo "Step 2: Creating workspace..."
-WORKSPACE_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/v1/workspaces?owner_username=${USERNAME}" \
+WORKSPACE_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/v1/workspaces" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -d '{
     "name": "Test Workspace",
     "plan_tier": "free"
@@ -222,11 +256,10 @@ echo "✅ Workspace created: ${WORKSPACE_ID}"
 # Step 3: Create Document
 echo ""
 echo "Step 3: Creating document..."
-DOC_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/v1/documents" \
+DOC_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/v1/workspaces/${WORKSPACE_ID}/documents" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -d "{
-    \"workspace_id\": \"${WORKSPACE_ID}\",
-    \"user_id\": \"${USER_ID}\",
     \"title\": \"Test ML Document\",
     \"doc_type\": \"text\",
     \"content\": \"Machine learning is a subset of artificial intelligence. It enables computers to learn from data. There are three main types: supervised learning, unsupervised learning, and reinforcement learning.\"
@@ -239,7 +272,8 @@ echo ""
 echo "Step 4: Checking document status..."
 echo "Note: Ingestion, summary, flashcards, and knowledge graph extraction happen automatically if preferences are enabled (default: true)"
 sleep 5  # Wait a bit for processing to start
-STATUS_RESPONSE=$(curl -s "${BASE_URL}/api/v1/documents/${DOCUMENT_ID}")
+STATUS_RESPONSE=$(curl -s -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  "${BASE_URL}/api/v1/documents/${DOCUMENT_ID}")
 echo "✅ Document status:"
 echo $STATUS_RESPONSE | python3 -m json.tool
 
@@ -268,10 +302,11 @@ chmod +x test_document_upload.sh
 - Make sure the workspace exists (create it first using `POST /api/v1/workspaces?owner_username={username}`)
 - Verify you're using the correct `workspace_id` UUID
 
-### Issue: "User {user_id} not found" (404)
+### Issue: "401 Unauthorized" or "Could not validate credentials"
 **Solution:**
-- Make sure the user exists (create via `POST /api/v1/auth/signup`)
-- Get the correct `user_id` UUID using `GET /api/v1/users/by-username/{username}`
+- Make sure you're including the JWT token in the Authorization header: `Authorization: Bearer YOUR_ACCESS_TOKEN`
+- Get a new token by logging in: `POST /api/v1/auth/login`
+- Check that the token hasn't expired (default: 7 days)
 
 ### Issue: "Document not found" (404)
 **Solution:** Make sure you're using the correct `document_id` from Step 3.

@@ -3,12 +3,15 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import get_current_user
 from app.infrastructure.database import get_db
+from app.models.user import User
 from app.schemas.common import ErrorResponse
+from app.services.workspace_service import WorkspaceService
 
 router = APIRouter()
 
@@ -60,14 +63,39 @@ class EdgeRead(BaseModel):
 )
 async def list_concepts(
     workspace_id: Annotated[uuid.UUID, Query(description="Workspace ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     document_id: Annotated[uuid.UUID | None, Query(description="Filter by document ID")] = None,
     q: Annotated[str | None, Query(description="Search query (name/description)")] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Maximum number of results")] = 20,
     offset: Annotated[int, Query(ge=0, description="Offset for pagination")] = 0,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[ConceptRead]:
-    """List concepts, optionally filtered by document or search query."""
+    """List concepts, optionally filtered by document or search query. Only accessible by workspace members."""
     try:
+        # Verify user has access to the workspace
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+        
+        # Check if user is owner or member
+        is_owner = workspace.owner_id == current_user.id
+        if not is_owner:
+            from sqlalchemy import select
+            from app.models.workspace_membership import WorkspaceMembership
+            
+            stmt = select(WorkspaceMembership).where(
+                (WorkspaceMembership.workspace_id == workspace_id) &
+                (WorkspaceMembership.user_id == current_user.id)
+            )
+            result = await db.execute(stmt)
+            membership = result.scalar_one_or_none()
+            if not membership:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to access concepts in this workspace"
+                )
+        
         from sqlalchemy import select, or_
         from app.models.concept import Concept
         
@@ -102,9 +130,10 @@ async def list_concepts(
 )
 async def get_concept(
     concept_id: Annotated[uuid.UUID, Path(description="Concept ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ConceptRead:
-    """Get a concept by ID."""
+    """Get a concept by ID. Only accessible by workspace members."""
     try:
         from sqlalchemy import select
         from app.models.concept import Concept
@@ -114,6 +143,30 @@ async def get_concept(
         concept = result.scalar_one_or_none()
         if not concept:
             raise HTTPException(status_code=404, detail=f"Concept {concept_id} not found")
+        
+        # Verify user has access to the workspace
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(concept.workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {concept.workspace_id} not found")
+        
+        # Check if user is owner or member
+        is_owner = workspace.owner_id == current_user.id
+        if not is_owner:
+            from app.models.workspace_membership import WorkspaceMembership
+            
+            stmt = select(WorkspaceMembership).where(
+                (WorkspaceMembership.workspace_id == concept.workspace_id) &
+                (WorkspaceMembership.user_id == current_user.id)
+            )
+            result = await db.execute(stmt)
+            membership = result.scalar_one_or_none()
+            if not membership:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to access this concept"
+                )
+        
         return ConceptRead.model_validate(concept)
     except HTTPException:
         raise
@@ -129,10 +182,11 @@ async def get_concept(
 )
 async def get_concept_neighbors(
     concept_id: Annotated[uuid.UUID, Path(description="Concept ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     depth: Annotated[int, Query(ge=1, le=3, description="Traversal depth (1-3)")] = 1,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[ConceptRead]:
-    """Get neighboring concepts up to specified depth."""
+    """Get neighboring concepts up to specified depth. Only accessible by workspace members."""
     try:
         from sqlalchemy import select
         from app.models.concept import Concept
@@ -144,6 +198,29 @@ async def get_concept_neighbors(
         concept = result.scalar_one_or_none()
         if not concept:
             raise HTTPException(status_code=404, detail=f"Concept {concept_id} not found")
+        
+        # Verify user has access to the workspace
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(concept.workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {concept.workspace_id} not found")
+        
+        # Check if user is owner or member
+        is_owner = workspace.owner_id == current_user.id
+        if not is_owner:
+            from app.models.workspace_membership import WorkspaceMembership
+            
+            stmt = select(WorkspaceMembership).where(
+                (WorkspaceMembership.workspace_id == concept.workspace_id) &
+                (WorkspaceMembership.user_id == current_user.id)
+            )
+            result = await db.execute(stmt)
+            membership = result.scalar_one_or_none()
+            if not membership:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to access this concept"
+                )
         
         # Get neighbors via edges
         neighbor_ids = set()
@@ -192,13 +269,38 @@ async def get_concept_neighbors(
 )
 async def list_edges(
     workspace_id: Annotated[uuid.UUID, Query(description="Workspace ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     concept_id: Annotated[uuid.UUID | None, Query(description="Filter by concept ID (src or dst)")] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Maximum number of results")] = 20,
     offset: Annotated[int, Query(ge=0, description="Offset for pagination")] = 0,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[EdgeRead]:
-    """List KG edges, optionally filtered by concept."""
+    """List KG edges, optionally filtered by concept. Only accessible by workspace members."""
     try:
+        # Verify user has access to the workspace
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+        
+        # Check if user is owner or member
+        is_owner = workspace.owner_id == current_user.id
+        if not is_owner:
+            from sqlalchemy import select
+            from app.models.workspace_membership import WorkspaceMembership
+            
+            stmt = select(WorkspaceMembership).where(
+                (WorkspaceMembership.workspace_id == workspace_id) &
+                (WorkspaceMembership.user_id == current_user.id)
+            )
+            result = await db.execute(stmt)
+            membership = result.scalar_one_or_none()
+            if not membership:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to access edges in this workspace"
+                )
+        
         from sqlalchemy import select
         from app.models.kg_edge import KGEdge
         

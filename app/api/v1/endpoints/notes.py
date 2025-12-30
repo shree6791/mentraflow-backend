@@ -2,11 +2,13 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import get_current_user
 from app.infrastructure.database import get_db
+from app.models.user import User
 from app.schemas.common import ErrorResponse
 from app.schemas.note import NoteCreate, NoteRead
 from app.services.notes_service import NotesService
@@ -31,7 +33,7 @@ class NoteUpdate(BaseModel):
 )
 async def create_note(
     request: NoteCreate,
-    user_id: Annotated[uuid.UUID, Query(description="User ID")],  # TODO: Get from auth
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> NoteRead:
     """Create a new note."""
@@ -39,7 +41,7 @@ async def create_note(
         service = NotesService(db)
         note = await service.create_note(
             workspace_id=request.workspace_id,
-            user_id=user_id,
+            user_id=current_user.id,
             content=request.body or "",
             source_document_id=request.document_id,
             note_type=request.note_type,
@@ -61,14 +63,15 @@ async def create_note(
 )
 async def list_notes(
     workspace_id: Annotated[uuid.UUID, Query(description="Workspace ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     document_id: Annotated[uuid.UUID | None, Query(description="Filter by document ID")] = None,
-    user_id: Annotated[uuid.UUID | None, Query(description="Filter by user ID")] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[NoteRead]:
-    """List notes, optionally filtered by document or user."""
+    """List notes for the authenticated user, optionally filtered by document."""
     try:
         service = NotesService(db)
-        notes = await service.list_notes(workspace_id=workspace_id, user_id=user_id)
+        # Only show notes for the authenticated user
+        notes = await service.list_notes(workspace_id=workspace_id, user_id=current_user.id)
         # TODO: Add document_id filtering to service
         if document_id:
             notes = [n for n in notes if n.document_id == document_id]
@@ -85,9 +88,10 @@ async def list_notes(
 )
 async def get_note(
     note_id: Annotated[uuid.UUID, Path(description="Note ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> NoteRead:
-    """Get a note by ID."""
+    """Get a note by ID. Only accessible by the note owner."""
     try:
         from sqlalchemy import select
         from app.models.note import Note
@@ -97,6 +101,14 @@ async def get_note(
         note = result.scalar_one_or_none()
         if not note:
             raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
+        
+        # Authorization check: ensure user owns the note
+        if note.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this note"
+            )
+        
         return NoteRead.model_validate(note)
     except HTTPException:
         raise
@@ -113,9 +125,10 @@ async def get_note(
 async def update_note(
     note_id: Annotated[uuid.UUID, Path(description="Note ID")],
     request: NoteUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> NoteRead:
-    """Update a note."""
+    """Update a note. Only accessible by the note owner."""
     try:
         from sqlalchemy import select
         from app.models.note import Note
@@ -125,6 +138,13 @@ async def update_note(
         note = result.scalar_one_or_none()
         if not note:
             raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
+        
+        # Authorization check: ensure user owns the note
+        if note.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to update this note"
+            )
         
         if request.title is not None:
             note.title = request.title
@@ -153,9 +173,10 @@ async def update_note(
 )
 async def delete_note(
     note_id: Annotated[uuid.UUID, Path(description="Note ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Delete a note."""
+    """Delete a note. Only accessible by the note owner."""
     try:
         from sqlalchemy import select
         from app.models.note import Note
@@ -165,6 +186,13 @@ async def delete_note(
         note = result.scalar_one_or_none()
         if not note:
             raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
+        
+        # Authorization check: ensure user owns the note
+        if note.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to delete this note"
+            )
         
         await db.delete(note)
         await db.commit()

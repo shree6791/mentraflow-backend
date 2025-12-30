@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.router import AgentRouter
 from app.agents.types import StudyChatAgentInput, StudyChatAgentOutput
 from app.api.dependencies import get_agent_router
+from app.core.security import get_current_user
 from app.infrastructure.database import get_db
+from app.models.user import User
 from app.schemas.chat import ChatResponse
 from app.schemas.common import ErrorResponse
 from app.services.conversation_service import ConversationService
@@ -44,6 +46,7 @@ async def check_rate_limit(
 )
 async def chat(
     request: StudyChatAgentInput,
+    current_user: Annotated[User, Depends(get_current_user)],
     agent_router: Annotated[AgentRouter, Depends(get_agent_router)],
     request_id: Annotated[str, Depends(get_request_id)],
     db: Annotated[AsyncSession, Depends(get_db)] = None,
@@ -57,8 +60,11 @@ async def chat(
     - Does NOT mutate state (no auto notes/flashcards/KG)
     - Supports conversation history for follow-up questions
     """
+    # Override user_id from request with authenticated user
+    request.user_id = current_user.id
+    
     # Rate limit check (placeholder)
-    await check_rate_limit(request.workspace_id, request.user_id, request_id)
+    await check_rate_limit(request.workspace_id, current_user.id, request_id)
 
     try:
         # Handle conversation history
@@ -122,7 +128,7 @@ async def chat(
             conversation_service = ConversationService(db)
             conversation = await conversation_service.create_conversation(
                 workspace_id=request.workspace_id,
-                user_id=request.user_id,
+                user_id=current_user.id,
                 title=request.message[:50] + "..." if len(request.message) > 50 else request.message,
             )
             conversation_id = conversation.id

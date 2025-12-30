@@ -2,13 +2,16 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import get_current_user
 from app.infrastructure.database import get_db
+from app.models.user import User
 from app.schemas.common import ErrorResponse
 from app.services.retrieval_service import RetrievalService
+from app.services.workspace_service import WorkspaceService
 
 router = APIRouter()
 
@@ -45,10 +48,35 @@ class SearchResponse(BaseModel):
 )
 async def search(
     request: SearchRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SearchResponse:
-    """Perform semantic search across workspace documents."""
+    """Perform semantic search across workspace documents. Only accessible by workspace members."""
     try:
+        # Verify user has access to the workspace
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(request.workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {request.workspace_id} not found")
+        
+        # Check if user is owner or member
+        is_owner = workspace.owner_id == current_user.id
+        if not is_owner:
+            from sqlalchemy import select
+            from app.models.workspace_membership import WorkspaceMembership
+            
+            stmt = select(WorkspaceMembership).where(
+                (WorkspaceMembership.workspace_id == request.workspace_id) &
+                (WorkspaceMembership.user_id == current_user.id)
+            )
+            result = await db.execute(stmt)
+            membership = result.scalar_one_or_none()
+            if not membership:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to search in this workspace"
+                )
+        
         service = RetrievalService(db)
         results = await service.semantic_search(
             workspace_id=request.workspace_id,

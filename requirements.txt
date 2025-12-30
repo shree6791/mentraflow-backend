@@ -50,4 +50,5 @@ python-multipart>=0.0.6  # Required for FastAPI file uploads and Form data
 bcrypt>=4.0.0  # Password hashing
 python-jose[cryptography]>=3.3.0  # JWT token generation and verification
 google-auth>=2.23.0  # Google Sign-In token verification
+slowapi>=0.1.8  # Rate limiting for API endpoints
 

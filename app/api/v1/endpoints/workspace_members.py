@@ -2,12 +2,15 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import get_current_user
 from app.infrastructure.database import get_db
+from app.models.user import User
 from app.schemas.common import ErrorResponse
+from app.services.workspace_service import WorkspaceService
 
 router = APIRouter()
 
@@ -40,10 +43,23 @@ class AddMemberRequest(BaseModel):
 async def add_workspace_member(
     workspace_id: Annotated[uuid.UUID, Path(description="Workspace ID")],
     request: AddMemberRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceMemberRead:
-    """Add a member to a workspace."""
+    """Add a member to a workspace. Only accessible by the workspace owner."""
     try:
+        # Verify user owns the workspace
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+        
+        if workspace.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to add members to this workspace"
+            )
+        
         from sqlalchemy.exc import SQLAlchemyError
         from app.models.workspace_membership import WorkspaceMembership
         
@@ -84,12 +100,35 @@ async def add_workspace_member(
 )
 async def list_workspace_members(
     workspace_id: Annotated[uuid.UUID, Path(description="Workspace ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[WorkspaceMemberRead]:
-    """List all members of a workspace."""
+    """List all members of a workspace. Only accessible by workspace members."""
     try:
+        # Verify user has access to the workspace (owner or member)
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+        
+        # Check if user is owner or member
         from sqlalchemy import select
         from app.models.workspace_membership import WorkspaceMembership
+        
+        is_owner = workspace.owner_id == current_user.id
+        if not is_owner:
+            # Check if user is a member
+            stmt = select(WorkspaceMembership).where(
+                (WorkspaceMembership.workspace_id == workspace_id) &
+                (WorkspaceMembership.user_id == current_user.id)
+            )
+            result = await db.execute(stmt)
+            membership = result.scalar_one_or_none()
+            if not membership:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to view members of this workspace"
+                )
         
         stmt = select(WorkspaceMembership).where(WorkspaceMembership.workspace_id == workspace_id)
         result = await db.execute(stmt)
@@ -108,10 +147,23 @@ async def list_workspace_members(
 async def remove_workspace_member(
     workspace_id: Annotated[uuid.UUID, Path(description="Workspace ID")],
     member_id: Annotated[uuid.UUID, Path(description="Membership ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Remove a member from a workspace."""
+    """Remove a member from a workspace. Only accessible by the workspace owner."""
     try:
+        # Verify user owns the workspace
+        workspace_service = WorkspaceService(db)
+        workspace = await workspace_service.get_workspace(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+        
+        if workspace.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to remove members from this workspace"
+            )
+        
         from sqlalchemy import select
         from app.models.workspace_membership import WorkspaceMembership
         

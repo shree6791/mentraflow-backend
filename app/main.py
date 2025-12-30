@@ -9,8 +9,11 @@ from contextlib import asynccontextmanager
 if "LANGCHAIN_TRACING_V2" not in os.environ:
     os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.qdrant_collections import ensure_collections_exist, drop_collections
@@ -112,6 +115,9 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Shutting down MentraFlow API...")
 
 
+# Rate limiter (in-memory, no Redis needed)
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
@@ -119,6 +125,10 @@ app = FastAPI(
     lifespan=lifespan,
     debug=settings.DEBUG,  # Enable FastAPI debug mode
 )
+
+# Add rate limiter to app state
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS middleware
 app.add_middleware(

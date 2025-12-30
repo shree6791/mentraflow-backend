@@ -60,9 +60,14 @@ class KGExtractionState(TypedDict):
     service_tools: Any
     llm: Any
     system_prompt: str
+    db: Any  # Database session for fallback chunk retrieval
 
 
-def build_kg_extraction_graph(service_tools: Any, llm: Any, system_prompt: str) -> StateGraph:
+def build_kg_extraction_graph(service_tools: Any, llm: Any, system_prompt: str, db: Any = None) -> StateGraph:
+    """Build the KG extraction graph.
+    
+    Note: db is accepted for consistency with other graphs but is only used from state.
+    """
     """Build the KG extraction graph.
     
     Args:
@@ -154,14 +159,42 @@ async def _retrieve_chunks(state: KGExtractionState) -> KGExtractionState:
     """Retrieve relevant chunks."""
     input_data = state["input_data"]
     service_tools = state["service_tools"]
+    db = state.get("db")  # Get db from state if available
     
     try:
+        # Try semantic search first
         search_results = await service_tools.retrieval_service.semantic_search(
             input_data.workspace_id,
-            query="",  # Empty query to get all chunks
+            query="main concepts key ideas important topics",  # Use meaningful query instead of empty
             top_k=20,
             filters={"document_id": str(input_data.source_document_id)},
         )
+        
+        # If semantic search returns no results, fallback to direct database query
+        if not search_results and db:
+            from app.models.document_chunk import DocumentChunk
+            from sqlalchemy import select
+            
+            stmt = (
+                select(DocumentChunk)
+                .where(DocumentChunk.document_id == input_data.source_document_id)
+                .order_by(DocumentChunk.chunk_index)
+                .limit(20)
+            )
+            result = await db.execute(stmt)
+            chunks = list(result.scalars().all())
+            
+            search_results = [
+                {
+                    "chunk_id": str(chunk.id),
+                    "content": chunk.content,
+                    "chunk_index": chunk.chunk_index,
+                    "score": 1.0,  # Default score for fallback
+                }
+                for chunk in chunks
+                if chunk.content
+            ]
+        
         return {
             **state,
             "search_results": search_results,

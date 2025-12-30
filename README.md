@@ -41,6 +41,20 @@ All documentation is available in the [`docs/`](./docs/) directory:
 - **[Deployment Status & Checklist](./docs/DEPLOYMENT_STATUS.md)** - What's complete and what's optional
 - **[Frontend + Backend Deployment](./docs/FRONTEND_BACKEND_DEPLOYMENT.md)** - Deploy both UI and API on same Droplet (assumes separate repos)
 
+## Authentication
+
+The API uses **JWT (JSON Web Tokens)** for authentication. All protected endpoints require an `Authorization: Bearer <token>` header.
+
+**Features:**
+- ✅ Secure password hashing (bcrypt)
+- ✅ Strong password requirements
+- ✅ Password reset functionality
+- ✅ Google Sign-In support
+- ✅ Rate limiting on auth endpoints
+- ✅ All endpoints secured with proper authorization
+
+See [API Routes](./docs/API_ROUTES.md#authentication) for authentication endpoints.
+
 ## Available Make Targets
 
 - `make install` - Install dependencies

@@ -5,6 +5,23 @@
 - API Prefix: `/api/v1`
 - Interactive Docs: `http://localhost:8000/docs` (Swagger UI)
 
+## Authentication
+
+**Most endpoints require JWT authentication.** Include the JWT token in the `Authorization` header:
+
+```
+Authorization: Bearer YOUR_JWT_TOKEN
+```
+
+To obtain a JWT token:
+1. **Sign up**: `POST /api/v1/auth/signup` (returns `access_token`)
+2. **Login**: `POST /api/v1/auth/login` (returns `access_token`)
+3. **Google Sign-In**: `POST /api/v1/auth/google` (returns `access_token`)
+
+See the [Authentication](#authentication) section below for detailed endpoint documentation.
+
+**Important:** All protected endpoints automatically filter results to show only data belonging to the authenticated user. You no longer need to pass `user_id` as a query parameter or in request bodies.
+
 ---
 
 ## Table of Contents
@@ -52,12 +69,11 @@ curl http://localhost:8000/health
 ## Workspaces
 
 ### Create Workspace
-**POST** `/api/v1/workspaces?owner_username={username}`
+**POST** `/api/v1/workspaces`
 
-Create a new workspace.
+Create a new workspace for the authenticated user.
 
-**Query Parameters:**
-- `owner_username` (string, required): Owner username (e.g., "shree6791")
+**Authentication:** Required (JWT token in Authorization header)
 
 **Request Body:**
 ```json
@@ -73,18 +89,15 @@ Create a new workspace.
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "name": "My Workspace",
   "plan_tier": "free",
-  "user_id": "550e8400-e29b-41d4-a716-446655440001",
+  "owner_id": "550e8400-e29b-41d4-a716-446655440001",
   "created_at": "2024-01-01T00:00:00Z"
 }
 ```
 
-**Error Responses:**
-- `400 Bad Request`: Missing `owner_username` parameter
-- `404 Not Found`: User with provided username not found (suggest signing up first)
-
 **cURL Example:**
 ```bash
-curl -X POST "http://localhost:8000/api/v1/workspaces?owner_username=shree6791" \
+curl -X POST "http://localhost:8000/api/v1/workspaces" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "My Workspace",
@@ -95,12 +108,11 @@ curl -X POST "http://localhost:8000/api/v1/workspaces?owner_username=shree6791" 
 ---
 
 ### List Workspaces
-**GET** `/api/v1/workspaces?owner_id={user_id}`
+**GET** `/api/v1/workspaces`
 
-List workspaces.
+List workspaces for the authenticated user.
 
-**Query Parameters:**
-- `owner_id` (UUID, optional): Filter by owner user ID
+**Authentication:** Required (JWT token in Authorization header)
 
 **Response:** `200 OK`
 ```json
@@ -109,19 +121,18 @@ List workspaces.
     "id": "550e8400-e29b-41d4-a716-446655440000",
     "name": "My Workspace",
     "plan_tier": "free",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "owner_id": "550e8400-e29b-41d4-a716-446655440001",
     "created_at": "2024-01-01T00:00:00Z"
   }
 ]
 ```
 
+**Note:** Results are automatically filtered to show only workspaces owned by the authenticated user.
+
 **cURL Example:**
 ```bash
-# List all workspaces
-curl "http://localhost:8000/api/v1/workspaces"
-
-# List workspaces for a specific owner
-curl "http://localhost:8000/api/v1/workspaces?owner_id=550e8400-e29b-41d4-a716-446655440001"
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/workspaces"
 ```
 
 ---
@@ -204,13 +215,14 @@ curl -X DELETE "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-
 ### Create Document
 **POST** `/api/v1/documents`
 
-Create a new document in a workspace.
+Create a new document in a workspace for the authenticated user.
+
+**Authentication:** Required (JWT token in Authorization header)
 
 **Request Body:**
 ```json
 {
   "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-  "user_id": "550e8400-e29b-41d4-a716-446655440001",
   "title": "My Study Document",
   "doc_type": "pdf",
   "source_url": "https://example.com/document.pdf",
@@ -219,6 +231,8 @@ Create a new document in a workspace.
   "metadata": {}
 }
 ```
+
+**Note:** Supports both JSON (text content) and multipart/form-data (file upload). See [Document Upload Testing](./DOCUMENT_UPLOAD_TESTING.md) for details.
 
 **Response:** `201 Created`
 ```json
@@ -235,10 +249,10 @@ Create a new document in a workspace.
 **cURL Example:**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/documents" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "title": "My Study Document",
     "doc_type": "pdf",
     "source_url": "https://example.com/document.pdf",
@@ -263,9 +277,9 @@ Create a new document in a specific workspace (alternative endpoint).
 **cURL Example:**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000/documents" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "title": "My Study Document",
     "doc_type": "pdf",
     "source_url": "https://example.com/document.pdf",
@@ -678,29 +692,35 @@ curl -X POST "http://localhost:8000/api/v1/chat" \
 ## Flashcards
 
 ### List Flashcards
-**GET** `/api/v1/flashcards?workspace_id={workspace_id}&document_id={document_id}&user_id={user_id}&limit=20&offset=0`
+**GET** `/api/v1/flashcards?workspace_id={workspace_id}&document_id={document_id}&limit=20&offset=0`
 
-List flashcards, optionally filtered by document or user.
+List flashcards for the authenticated user, optionally filtered by workspace and/or document.
+
+**Authentication:** Required (JWT token in Authorization header)
 
 **Query Parameters:**
-- `workspace_id` (UUID, required): Workspace ID
-- `document_id` (UUID, optional): Filter by document ID
-- `user_id` (UUID, optional): Filter by user ID
+- `workspace_id` (UUID, optional): Workspace ID. If not provided, will be inferred from `document_id`
+- `document_id` (UUID, optional): Filter by document ID. If provided without `workspace_id`, the workspace will be automatically determined from the document
 - `limit` (int, default: 20, max: 100): Maximum number of results
 - `offset` (int, default: 0): Offset for pagination
+
+**Note:** At least one of `workspace_id` or `document_id` must be provided.
 
 **Response:** `200 OK` (list of FlashcardRead)
 
 **cURL Example:**
 ```bash
 # List all flashcards in workspace
-curl "http://localhost:8000/api/v1/flashcards?workspace_id=550e8400-e29b-41d4-a716-446655440000&limit=20&offset=0"
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/flashcards?workspace_id=550e8400-e29b-41d4-a716-446655440000&limit=20&offset=0"
 
-# List flashcards for a specific document
-curl "http://localhost:8000/api/v1/flashcards?workspace_id=550e8400-e29b-41d4-a716-446655440000&document_id=550e8400-e29b-41d4-a716-446655440002"
+# List flashcards for a specific document (workspace_id inferred automatically)
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/flashcards?document_id=550e8400-e29b-41d4-a716-446655440002"
 
-# List flashcards for a specific user
-curl "http://localhost:8000/api/v1/flashcards?workspace_id=550e8400-e29b-41d4-a716-446655440000&user_id=550e8400-e29b-41d4-a716-446655440001"
+# List flashcards with both workspace and document filters
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/flashcards?workspace_id=550e8400-e29b-41d4-a716-446655440000&document_id=550e8400-e29b-41d4-a716-446655440002"
 ```
 
 ---
@@ -708,35 +728,44 @@ curl "http://localhost:8000/api/v1/flashcards?workspace_id=550e8400-e29b-41d4-a7
 ### Get Flashcard
 **GET** `/api/v1/flashcards/{flashcard_id}`
 
-Get a flashcard by ID.
+Get a flashcard by ID. Only accessible by the flashcard owner.
+
+**Authentication:** Required (JWT token in Authorization header)
 
 **Path Parameters:**
 - `flashcard_id` (UUID): Flashcard ID
 
 **Response:** `200 OK` (FlashcardRead)
 
+**Error Responses:**
+- `403 Forbidden`: User doesn't have permission to access this flashcard
+- `404 Not Found`: Flashcard not found
+
 **cURL Example:**
 ```bash
-curl "http://localhost:8000/api/v1/flashcards/550e8400-e29b-41d4-a716-446655440009"
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/flashcards/550e8400-e29b-41d4-a716-446655440009"
 ```
 
 ---
 
 ### Get Due Flashcards
-**GET** `/api/v1/flashcards/due?workspace_id={workspace_id}&user_id={user_id}&limit=20`
+**GET** `/api/v1/flashcards/due?workspace_id={workspace_id}&limit=20`
 
-Get flashcards due for review (SRS algorithm).
+Get flashcards due for review (SRS algorithm) for the authenticated user.
+
+**Authentication:** Required (JWT token in Authorization header)
 
 **Query Parameters:**
 - `workspace_id` (UUID, required): Workspace ID
-- `user_id` (UUID, required): User ID
 - `limit` (int, default: 20, max: 100): Maximum number of results
 
 **Response:** `200 OK` (list of FlashcardRead)
 
 **cURL Example:**
 ```bash
-curl "http://localhost:8000/api/v1/flashcards/due?workspace_id=550e8400-e29b-41d4-a716-446655440000&user_id=550e8400-e29b-41d4-a716-446655440001&limit=20"
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/flashcards/due?workspace_id=550e8400-e29b-41d4-a716-446655440000&limit=20"
 ```
 
 ---
@@ -744,7 +773,9 @@ curl "http://localhost:8000/api/v1/flashcards/due?workspace_id=550e8400-e29b-41d
 ### Review Flashcard
 **POST** `/api/v1/flashcards/{flashcard_id}/review?force=false`
 
-Record a flashcard review and update SRS state.
+Record a flashcard review and update SRS state. Only accessible by the flashcard owner.
+
+**Authentication:** Required (JWT token in Authorization header)
 
 **Path Parameters:**
 - `flashcard_id` (UUID): Flashcard ID
@@ -755,7 +786,6 @@ Record a flashcard review and update SRS state.
 **Request Body:**
 ```json
 {
-  "user_id": "550e8400-e29b-41d4-a716-446655440001",
   "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
   "grade": 2,
   "response_time_ms": 5000
@@ -785,9 +815,9 @@ Record a flashcard review and update SRS state.
 ```bash
 # Normal review (respects due date and cooldown)
 curl -X POST "http://localhost:8000/api/v1/flashcards/550e8400-e29b-41d4-a716-446655440009/review" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
     "grade": 2,
     "response_time_ms": 5000
@@ -795,9 +825,9 @@ curl -X POST "http://localhost:8000/api/v1/flashcards/550e8400-e29b-41d4-a716-44
 
 # Force review (bypass due check and cooldown)
 curl -X POST "http://localhost:8000/api/v1/flashcards/550e8400-e29b-41d4-a716-446655440009/review?force=true" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
     "grade": 4,
     "response_time_ms": 3000
@@ -809,12 +839,11 @@ curl -X POST "http://localhost:8000/api/v1/flashcards/550e8400-e29b-41d4-a716-44
 ## Notes
 
 ### Create Note
-**POST** `/api/v1/notes?user_id={user_id}`
+**POST** `/api/v1/notes`
 
-Create a new note.
+Create a new note for the authenticated user.
 
-**Query Parameters:**
-- `user_id` (UUID, required): User ID
+**Authentication:** Required (JWT token in Authorization header)
 
 **Request Body:**
 ```json
@@ -832,7 +861,8 @@ Create a new note.
 
 **cURL Example:**
 ```bash
-curl -X POST "http://localhost:8000/api/v1/notes?user_id=550e8400-e29b-41d4-a716-446655440001" \
+curl -X POST "http://localhost:8000/api/v1/notes" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -847,14 +877,13 @@ curl -X POST "http://localhost:8000/api/v1/notes?user_id=550e8400-e29b-41d4-a716
 ---
 
 ### List Notes
-**GET** `/api/v1/notes?workspace_id={workspace_id}&document_id={document_id}&user_id={user_id}`
+**GET** `/api/v1/notes?workspace_id={workspace_id}&document_id={document_id}`
 
 List notes, optionally filtered by document or user.
 
 **Query Parameters:**
 - `workspace_id` (UUID, required): Workspace ID
 - `document_id` (UUID, optional): Filter by document ID
-- `user_id` (UUID, optional): Filter by user ID
 
 **Response:** `200 OK` (list of NoteRead)
 
@@ -1098,12 +1127,11 @@ curl -X POST "http://localhost:8000/api/v1/search" \
 ## Preferences
 
 ### Get User Preferences
-**GET** `/api/v1/preferences?user_id={user_id}&workspace_id={workspace_id}`
+**GET** `/api/v1/preferences?workspace_id={workspace_id}`
 
 Get user preferences, creating defaults if not exists.
 
 **Query Parameters:**
-- `user_id` (UUID, required): User ID
 - `workspace_id` (UUID, optional): Workspace ID
 
 **Response:** `200 OK`
@@ -1135,7 +1163,6 @@ curl "http://localhost:8000/api/v1/preferences?user_id=550e8400-e29b-41d4-a716-4
 Update user preferences.
 
 **Query Parameters:**
-- `user_id` (UUID, required): User ID
 - `workspace_id` (UUID, optional): Workspace ID
 
 **Request Body:**
@@ -1209,39 +1236,44 @@ curl "http://localhost:8000/api/v1/agent-runs/550e8400-e29b-41d4-a716-4466554400
 ---
 
 ### List Agent Runs
-**GET** `/api/v1/agent-runs?workspace_id={workspace_id}&user_id={user_id}&agent_name={agent_name}&status={status}&limit=20&offset=0`
+**GET** `/api/v1/agent-runs?workspace_id={workspace_id}&agent_name={agent_name}&status={status}&limit=20&offset=0`
 
-List agent runs, optionally filtered by workspace, user, agent, or status.
+List agent runs for the authenticated user, optionally filtered by workspace, agent, or status.
+
+**Authentication:** Required (JWT token in Authorization header)
 
 **Query Parameters:**
 - `workspace_id` (UUID, optional): Filter by workspace ID
-- `user_id` (UUID, optional): Filter by user ID
 - `agent_name` (string, optional): Filter by agent name (`ingestion`, `study_chat`, `flashcard`, `kg_extraction`)
 - `status` (string, optional): Filter by status (`queued`, `running`, `completed`, `failed`)
 - `limit` (int, default: 20, max: 100): Maximum number of results
 - `offset` (int, default: 0): Offset for pagination
 
+**Note:** Results are automatically filtered to show only agent runs for the authenticated user.
+
 **Response:** `200 OK` (list of AgentRunRead)
 
 **cURL Example:**
 ```bash
-# List all agent runs
-curl "http://localhost:8000/api/v1/agent-runs?limit=20&offset=0"
+# List all agent runs for authenticated user
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/agent-runs?limit=20&offset=0"
 
 # Filter by workspace
-curl "http://localhost:8000/api/v1/agent-runs?workspace_id=550e8400-e29b-41d4-a716-446655440000"
-
-# Filter by user
-curl "http://localhost:8000/api/v1/agent-runs?user_id=550e8400-e29b-41d4-a716-446655440001"
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/agent-runs?workspace_id=550e8400-e29b-41d4-a716-446655440000"
 
 # Filter by agent name
-curl "http://localhost:8000/api/v1/agent-runs?agent_name=ingestion"
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/agent-runs?agent_name=ingestion"
 
 # Filter by status
-curl "http://localhost:8000/api/v1/agent-runs?status=completed"
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/agent-runs?status=completed"
 
 # Combined filters
-curl "http://localhost:8000/api/v1/agent-runs?workspace_id=550e8400-e29b-41d4-a716-446655440000&agent_name=flashcard&status=running"
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/agent-runs?workspace_id=550e8400-e29b-41d4-a716-446655440000&agent_name=flashcard&status=running"
 ```
 
 ---
@@ -1350,7 +1382,16 @@ Create a new user account with username, email and password. Automatically creat
 }
 ```
 
-**Note:** Password hashing and JWT token generation are placeholders (TODO: implement with bcrypt and python-jose).
+**Password Requirements:**
+- Minimum 8 characters
+- At least one uppercase letter
+- At least one lowercase letter
+- At least one number
+- At least one special character
+
+**Rate Limiting:** 5 requests per minute per IP
+
+**Note:** ✅ Fully implemented with bcrypt password hashing and JWT token generation.
 
 **cURL Example:**
 ```bash
@@ -1392,7 +1433,9 @@ Login with email and password. If user doesn't exist, creates user automatically
 }
 ```
 
-**Note:** Password verification and JWT token generation are placeholders (TODO: implement).
+**Rate Limiting:** 10 requests per minute per IP (prevents brute force attacks)
+
+**Note:** ✅ Fully implemented with bcrypt password verification and JWT token generation.
 
 **cURL Example:**
 ```bash
@@ -1433,7 +1476,7 @@ Authenticate with Google Sign-In. Verifies Google ID token and creates/updates u
 }
 ```
 
-**Note:** Google ID token verification and JWT token generation are placeholders (TODO: implement with google-auth and python-jose).
+**Note:** ✅ Fully implemented with google-auth token verification and JWT token generation. Requires `GOOGLE_CLIENT_ID` in environment variables.
 
 **cURL Example:**
 ```bash
@@ -1444,6 +1487,110 @@ curl -X POST "http://localhost:8000/api/v1/auth/google" \
     "email": "user@gmail.com",
     "full_name": "John Doe",
     "display_name": "John"
+  }'
+```
+
+---
+
+### Get Current User
+**GET** `/api/v1/auth/me`
+
+Get the current authenticated user from JWT token. Requires authentication.
+
+**Headers:**
+```
+Authorization: Bearer YOUR_ACCESS_TOKEN
+```
+
+**Response:** `200 OK`
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440001",
+  "username": "shree6791",
+  "email": "user@example.com",
+  "full_name": "John Doe",
+  "display_name": "John",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+**cURL Example:**
+```bash
+curl -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  "http://localhost:8000/api/v1/auth/me"
+```
+
+---
+
+### Forgot Password
+**POST** `/api/v1/auth/forgot-password`
+
+Request a password reset. Generates a reset token (valid for 1 hour). In production, this token should be sent via email.
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "message": "If an account with that email exists, a password reset link has been sent.",
+  "reset_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expires_in": "1 hour",
+  "note": "Use this token with /auth/reset-password endpoint. In production, send via email."
+}
+```
+
+**Rate Limiting:** 3 requests per hour per IP
+
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/forgot-password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com"
+  }'
+```
+
+---
+
+### Reset Password
+**POST** `/api/v1/auth/reset-password`
+
+Reset password using reset token.
+
+**Request Body:**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "new_password": "NewSecurePass123!"
+}
+```
+
+**Password Requirements:** Same as signup (8+ chars, uppercase, lowercase, number, special char)
+
+**Response:** `200 OK`
+```json
+{
+  "message": "Password has been reset successfully",
+  "user_id": "550e8400-e29b-41d4-a716-446655440001",
+  "email": "user@example.com"
+}
+```
+
+**Rate Limiting:** 5 requests per hour per IP
+
+**cURL Example:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/reset-password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "new_password": "NewSecurePass123!"
   }'
 ```
 
@@ -1468,61 +1615,84 @@ curl -X POST "http://localhost:8000/api/v1/auth/logout"
 
 ---
 
+## Authentication & Authorization
+
+**All protected endpoints require JWT authentication:**
+
+Include the access token in the `Authorization` header:
+```
+Authorization: Bearer YOUR_ACCESS_TOKEN
+```
+
+**Protected endpoints:** All endpoints except:
+- `/health` and `/api/v1/health`
+- `/api/v1/version`
+- `/api/v1/auth/signup`
+- `/api/v1/auth/login`
+- `/api/v1/auth/google`
+- `/api/v1/auth/forgot-password`
+- `/api/v1/auth/reset-password`
+- `/api/v1/users/by-username/{username}` (public user lookup)
+
+**Authorization:** Users can only access/modify their own resources (notes, flashcards, documents they created) or resources in workspaces they belong to.
+
+---
+
 ### Get Current User
-**GET** `/api/v1/auth/me?user_id={user_id}`
+**GET** `/api/v1/auth/me`
 
 Get current authenticated user information.
 
-**Query Parameters:**
-- `user_id` (UUID, required): User ID (TODO: Extract from JWT token instead of query parameter)
+**Authentication:** Required (JWT token in Authorization header)
 
 **Response:** `200 OK`
 ```json
 {
-  "user_id": "550e8400-e29b-41d4-a716-446655440001",
+  "id": "550e8400-e29b-41d4-a716-446655440001",
+  "username": "shree6791",
   "email": "user@example.com",
   "full_name": "John Doe",
   "display_name": "John",
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer"
+  "created_at": "2024-01-01T00:00:00Z"
 }
 ```
 
-**Note:** Currently requires `user_id` query parameter. TODO: Extract from JWT token in Authorization header.
-
 **cURL Example:**
 ```bash
-curl "http://localhost:8000/api/v1/auth/me?user_id=550e8400-e29b-41d4-a716-446655440001"
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/auth/me"
 ```
 
 ---
 
 ## Complete Testing Flow
 
-### Step 0: Sign Up / Login (Optional)
+### Step 0: Sign Up / Login (Required)
 ```bash
 # Sign up with email/password
-curl -X POST "http://localhost:8000/api/v1/auth/signup" \
+SIGNUP_RESPONSE=$(curl -s -X POST "http://localhost:8000/api/v1/auth/signup" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "shree6791",
     "email": "user@example.com",
-    "password": "password123",
+    "password": "SecurePass123!",
     "full_name": "Test User"
-  }'
+  }')
 
-# Or login
-curl -X POST "http://localhost:8000/api/v1/auth/login" \
+# Extract access token (save this for all subsequent requests)
+ACCESS_TOKEN=$(echo $SIGNUP_RESPONSE | python3 -c "import sys, json; print(json.load(sys.stdin).get('access_token', ''))")
+
+# Or login if you already have an account
+LOGIN_RESPONSE=$(curl -s -X POST "http://localhost:8000/api/v1/auth/login" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
-    "password": "password123"
-  }'
-
-# Save the username from the response for subsequent requests (e.g., "shree6791")
+    "password": "SecurePass123!"
+  }')
+ACCESS_TOKEN=$(echo $LOGIN_RESPONSE | python3 -c "import sys, json; print(json.load(sys.stdin).get('access_token', ''))")
 ```
 
-**Note:** When a user signs up or logs in for the first time, default user preferences are automatically created. Use the `username` from the response for workspace creation.
+**Note:** When a user signs up or logs in for the first time, default user preferences are automatically created. Save the `access_token` from the response for all subsequent authenticated requests.
 
 ### Step 1: Health Check
 ```bash
@@ -1531,38 +1701,45 @@ curl http://localhost:8000/health
 
 ### Step 2: Create a Workspace
 ```bash
-curl -X POST "http://localhost:8000/api/v1/workspaces?owner_username=shree6791" \
+WORKSPACE_RESPONSE=$(curl -s -X POST "http://localhost:8000/api/v1/workspaces" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "My Study Workspace",
     "plan_tier": "free"
-  }'
+  }')
+
+# Extract workspace_id
+WORKSPACE_ID=$(echo $WORKSPACE_RESPONSE | python3 -c "import sys, json; print(json.load(sys.stdin).get('id', ''))")
 ```
 
 **Save the `workspace_id` from the response.**
 
 ### Step 3: Create a Document
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents" \
+DOC_RESPONSE=$(curl -s -X POST "http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/documents" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "workspace_id": "{workspace_id}",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "workspace_id": "'$WORKSPACE_ID'",
     "title": "Introduction to Machine Learning",
-    "doc_type": "pdf",
+    "doc_type": "text",
     "content": "Machine learning is a subset of artificial intelligence that focuses on algorithms that can learn from data. It enables computers to improve their performance on a task through experience without being explicitly programmed for every scenario."
-  }'
+  }')
+
+# Extract document_id
+DOCUMENT_ID=$(echo $DOC_RESPONSE | python3 -c "import sys, json; print(json.load(sys.stdin).get('id', ''))")
 ```
 
 **Save the `document_id` from the response.**
 
 ### Step 4: Ingest the Document (if not auto-ingested)
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/ingest" \
+curl -X POST "http://localhost:8000/api/v1/documents/$DOCUMENT_ID/ingest" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "workspace_id": "{workspace_id}",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001"
+    "workspace_id": "'$WORKSPACE_ID'"
   }'
 ```
 
@@ -1571,22 +1748,22 @@ curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/ingest" \
 ### Step 5: Chat with the Document
 ```bash
 curl -X POST "http://localhost:8000/api/v1/chat" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "workspace_id": "{workspace_id}",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "workspace_id": "'$WORKSPACE_ID'",
     "message": "What is machine learning?",
-    "document_id": "{document_id}"
+    "document_id": "'$DOCUMENT_ID'"
   }'
 ```
 
 ### Step 6: Generate Flashcards (Optional)
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/flashcards" \
+curl -X POST "http://localhost:8000/api/v1/documents/$DOCUMENT_ID/flashcards" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "workspace_id": "{workspace_id}",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
+    "workspace_id": "'$WORKSPACE_ID'",
     "mode": "mcq"
   }'
 ```
@@ -1662,5 +1839,5 @@ curl -X POST "http://localhost:8000/api/v1/flashcards/{flashcard_id}/review" \
 | Preferences | Get, Update | 2 |
 | Agent Runs | Get, List | 2 |
 | Workspace Members | Add, List, Remove | 3 |
-| Authentication | Signup, Login, Google, Logout, Me | 5 |
-| **Total** | | **46 routes** |
+| Authentication | Signup, Login, Google, Logout, Me, Forgot Password, Reset Password | 7 |
+| **Total** | | **48 routes** |

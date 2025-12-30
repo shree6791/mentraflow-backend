@@ -1,4 +1,5 @@
 """Centralized ingestion graph definition."""
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Literal, TypedDict
@@ -23,6 +24,7 @@ class IngestionState(TypedDict):
     service_tools: Any
     db: Any
     run_id: Any  # Agent run ID for logging steps
+    preferences: Any  # User preferences (fetched once for parallel operations)
 
 
 def build_ingestion_graph(service_tools: Any, db: Any) -> StateGraph:
@@ -278,14 +280,22 @@ async def _embed_chunks(state: IngestionState) -> IngestionState:
 
 async def _generate_optional_content(state: IngestionState) -> IngestionState:
     """Generate summary, flashcards, and KG in parallel (best effort - failures don't block)."""
-    import asyncio
+    # Fetch preferences once to avoid duplicate queries in parallel operations
+    input_data = state["input_data"]
+    db = state["db"]
+    from app.services.user_preference_service import UserPreferenceService
+    pref_service = UserPreferenceService(db)
+    preferences = await pref_service.get_preferences(user_id=input_data.user_id)
+    
+    # Add preferences to state for use by parallel operations
+    state_with_prefs = {**state, "preferences": preferences}
     
     # Run all three operations in parallel
     # Each function handles its own errors internally, but we log any unexpected exceptions
     results = await asyncio.gather(
-        _generate_summary(state),
-        _generate_flashcards(state),
-        _generate_kg(state),
+        _generate_summary(state_with_prefs),
+        _generate_flashcards(state_with_prefs),
+        _generate_kg(state_with_prefs),
         return_exceptions=True,  # Don't raise exceptions, let each function handle them
     )
     
@@ -302,13 +312,9 @@ async def _generate_summary(state: IngestionState) -> IngestionState:
     """Generate summary after ingestion (best effort - failures don't block)."""
     input_data = state["input_data"]
     db = state["db"]
+    preferences = state["preferences"]
     
     try:
-        # Check user preferences for auto_summary_after_ingest
-        from app.services.user_preference_service import UserPreferenceService
-        pref_service = UserPreferenceService(db)
-        preferences = await pref_service.get_preferences(user_id=input_data.user_id)
-        
         if preferences.auto_summary_after_ingest:
             await _log_step(state, "summary", "started")
             # Use SummaryAgent for consistency with other LLM operations
@@ -379,13 +385,9 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
     """Generate flashcards after ingestion (best effort - failures don't block)."""
     input_data = state["input_data"]
     db = state["db"]
+    preferences = state["preferences"]
     
     try:
-        # Check user preferences for auto_flashcards_after_ingest
-        from app.services.user_preference_service import UserPreferenceService
-        pref_service = UserPreferenceService(db)
-        preferences = await pref_service.get_preferences(user_id=input_data.user_id)
-        
         if preferences.auto_flashcards_after_ingest:
             await _log_step(state, "flashcards", "started")
             # Use FlashcardAgent for consistency with other LLM operations
@@ -487,13 +489,9 @@ async def _generate_kg(state: IngestionState) -> IngestionState:
     """Generate knowledge graph after ingestion (best effort - failures don't block)."""
     input_data = state["input_data"]
     db = state["db"]
+    preferences = state["preferences"]
     
     try:
-        # Check user preferences for auto_kg_after_ingest
-        from app.services.user_preference_service import UserPreferenceService
-        pref_service = UserPreferenceService(db)
-        preferences = await pref_service.get_preferences(user_id=input_data.user_id)
-        
         if preferences.auto_kg_after_ingest:
             await _log_step(state, "kg_extraction", "started")
             # Use KGExtractionAgent for consistency with other LLM operations
@@ -514,23 +512,21 @@ async def _generate_kg(state: IngestionState) -> IngestionState:
                     raise ValueError("KG extraction agent returned empty output")
                 
                 # Verify concepts and edges were stored in database
-                from sqlalchemy import select
+                # Note: We check workspace-level counts as a verification,
+                # but the actual counts come from kg_output which is more accurate
+                from sqlalchemy import select, func
                 from app.models.concept import Concept
                 from app.models.kg_edge import KGEdge
                 
-                # Check concepts
-                stmt = select(Concept).where(
+                # Get counts efficiently (no need to load all records)
+                concepts_count_stmt = select(func.count(Concept.id)).where(
                     Concept.workspace_id == input_data.workspace_id
                 )
-                result = await db.execute(stmt)
-                concepts_in_db = result.scalars().all()
-                
-                # Check edges
-                stmt = select(KGEdge).where(
+                edges_count_stmt = select(func.count(KGEdge.id)).where(
                     KGEdge.workspace_id == input_data.workspace_id
                 )
-                result = await db.execute(stmt)
-                edges_in_db = result.scalars().all()
+                concepts_count = (await db.execute(concepts_count_stmt)).scalar() or 0
+                edges_count = (await db.execute(edges_count_stmt)).scalar() or 0
                 
                 if kg_output.concepts_written > 0 or kg_output.edges_written > 0:
                     await _log_step(
@@ -540,8 +536,8 @@ async def _generate_kg(state: IngestionState) -> IngestionState:
                         details={
                             "concepts_written": kg_output.concepts_written,
                             "edges_written": kg_output.edges_written,
-                            "concepts_in_db": len(concepts_in_db),
-                            "edges_in_db": len(edges_in_db),
+                            "concepts_in_db": concepts_count,
+                            "edges_in_db": edges_count,
                             "stored_in_db": True,
                         },
                     )
@@ -558,6 +554,8 @@ async def _generate_kg(state: IngestionState) -> IngestionState:
                         },
                     )
             except Exception as kg_error:
+                # Log the error before re-raising
+                await _log_step(state, "kg_extraction", "failed", error=str(kg_error))
                 # Re-raise to be caught by outer try/except
                 raise
         else:
