@@ -12,8 +12,35 @@ from app.models.user import User
 from app.schemas.common import ErrorResponse
 from app.schemas.note import NoteCreate, NoteRead
 from app.services.notes_service import NotesService
+from app.services.workspace_service import WorkspaceService
 
 router = APIRouter()
+
+
+async def _verify_workspace_access(
+    workspace_id: uuid.UUID,
+    current_user: User,
+    db: AsyncSession,
+) -> None:
+    """Verify current user is owner or member of workspace. Raises HTTPException 403/404 if not."""
+    workspace_service = WorkspaceService(db)
+    workspace = await workspace_service.get_workspace(workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+    if workspace.owner_id == current_user.id:
+        return
+    from sqlalchemy import select
+    from app.models.workspace_membership import WorkspaceMembership
+    stmt = select(WorkspaceMembership).where(
+        (WorkspaceMembership.workspace_id == workspace_id)
+        & (WorkspaceMembership.user_id == current_user.id)
+    )
+    result = await db.execute(stmt)
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this workspace",
+        )
 
 
 class NoteUpdate(BaseModel):
@@ -36,7 +63,8 @@ async def create_note(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> NoteRead:
-    """Create a new note."""
+    """Create a new note. Requires workspace owner or member."""
+    await _verify_workspace_access(request.workspace_id, current_user, db)
     try:
         service = NotesService(db)
         note = await service.create_note(
@@ -67,7 +95,8 @@ async def list_notes(
     document_id: Annotated[uuid.UUID | None, Query(description="Filter by document ID")] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[NoteRead]:
-    """List notes for the authenticated user, optionally filtered by document."""
+    """List notes for the authenticated user, optionally filtered by document. Requires workspace owner or member."""
+    await _verify_workspace_access(workspace_id, current_user, db)
     try:
         service = NotesService(db)
         # Only show notes for the authenticated user

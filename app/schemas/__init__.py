@@ -1,4 +1,5 @@
 """Pydantic schemas module."""
+from app.schemas.conversation import ConversationListItem, ConversationMessageRead, ConversationWithMessages
 from app.schemas.chat import (
     ChatMessage,
     ChatRequest,
@@ -24,6 +25,7 @@ from app.schemas.flashcard import (
 )
 from app.schemas.note import NoteCreate, NoteRead
 from app.schemas.user import UserCreate, UserRead
+from app.schemas.insights import WorkspaceInsightsResponse
 from app.schemas.workspace import WorkspaceCreate, WorkspaceRead
 
 __all__ = [
@@ -39,6 +41,8 @@ __all__ = [
     # Workspace
     "WorkspaceCreate",
     "WorkspaceRead",
+    # Insights
+    "WorkspaceInsightsResponse",
     # Document
     "DocumentCreate",
     "DocumentRead",
@@ -55,4 +59,8 @@ __all__ = [
     "ChatRequest",
     "ChatResponse",
     "ChatStreamChunk",
+    # Conversation
+    "ConversationListItem",
+    "ConversationMessageRead",
+    "ConversationWithMessages",
 ]

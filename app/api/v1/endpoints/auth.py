@@ -490,12 +490,13 @@ async def reset_password(
 )
 async def get_user_by_username(
     username: Annotated[str, Path(description="Username to look up")],
+    current_user: Annotated[User, Depends(get_current_user_dep)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AuthResponse:
-    """Get user information by username.
+    """Get user information by username. Requires authentication.
     
-    Useful for looking up user_id when you only have the username.
-    Returns user information including user_id, which can be used for document creation, etc.
+    Useful for looking up user_id when you only have the username (e.g. invite flows).
+    Returns user information including user_id. Only available to authenticated users.
     """
     try:
         user_service = UserService(db)

@@ -12,6 +12,14 @@ from app.agents.types import StudyChatAgentInput, StudyChatAgentOutput
 class StudyChatAgent(BaseAgent[StudyChatAgentInput, StudyChatAgentOutput]):
     """Agent for answering study questions with citations using LangGraph."""
 
+    def _serialize_input_for_logging(self, input_data: StudyChatAgentInput) -> dict[str, Any]:
+        """JSONB-safe serialization (UUIDs → strings) for agent_runs.input."""
+        return input_data.model_dump(mode="json")
+
+    def _serialize_output_for_logging(self, output: StudyChatAgentOutput) -> dict[str, Any]:
+        """JSONB-safe serialization (UUIDs etc. → strings) for agent_runs.output."""
+        return output.model_dump(mode="json")
+
     def __init__(
         self,
         db: AsyncSession,

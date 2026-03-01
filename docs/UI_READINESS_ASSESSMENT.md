@@ -33,6 +33,7 @@ This document outlines what's available for frontend development and what can be
 - Document detail page
 - Progress tracking (show ingestion status)
 - File preview/display
+- **Document modal links:** Make "Flashcards" and "KG Concepts" counts link to Quiz page and KG page. Use `document_id` and `workspace_id` from the document: Quiz → `/quiz?document_id=...&workspace_id=...` (load cards via `GET /api/v1/flashcards?document_id=...`); KG → `/kg?workspace_id=...` (use `GET /api/v1/kg/concepts` and `/api/v1/kg/edges`).
 
 ---
 

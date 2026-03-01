@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, Filter, FieldCondition, MatchValue
+from qdrant_client.models import Distance, PointStruct, Filter, FieldCondition, MatchValue, FilterSelector
 
 from app.core.config import settings
 from app.core.qdrant_collections import (
@@ -408,6 +408,38 @@ class QdrantClientWrapper:
             score_threshold=score_threshold,
             collection_type="concepts",
         )
+
+    async def delete_points_by_workspace_id(self, workspace_id: uuid.UUID) -> None:
+        """Delete all points (chunks and concepts) for a workspace from Qdrant.
+        Call this when a workspace is deleted so vectors are not left orphaned.
+        """
+        import asyncio
+
+        qdrant_filter = Filter(
+            must=[FieldCondition(key="workspace_id", match=MatchValue(value=str(workspace_id)))]
+        )
+        selector = FilterSelector(filter=qdrant_filter)
+
+        for collection_type, collection_name in [
+            ("chunks", CHUNKS_COLLECTION),
+            ("concepts", CONCEPTS_COLLECTION),
+        ]:
+            try:
+                await asyncio.to_thread(
+                    self.client.delete,
+                    collection_name=collection_name,
+                    points_selector=selector,
+                )
+                logger.info("Deleted Qdrant points for workspace %s from %s", workspace_id, collection_name)
+            except Exception as e:
+                logger.warning(
+                    "Failed to delete Qdrant points for workspace %s from %s: %s",
+                    workspace_id,
+                    collection_name,
+                    e,
+                    exc_info=True,
+                )
+                # Continue with other collection; do not raise so DB delete can still proceed
 
 
 # Global instance

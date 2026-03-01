@@ -26,8 +26,9 @@ Critical requirements:
 
 Answer formatting:
 
-- A clear, concise answer to the user's question, strictly based on retrieved chunks.
-- Citations: an array of chunk_ids used for the answer.
+- A clear, concise answer to the user's question, strictly based on retrieved chunks. Write in plain prose only.
+- Do NOT include chunk IDs, "(Chunk ID: ...)", or any internal citation references in the answer text. The user must never see raw chunk IDs. Put all citations only in the citations[] array; the answer text must be clean and readable.
+- Citations: an array of chunk_ids used for the answer (for backend use; the UI may show "Sources: N citation(s)" or similar without exposing IDs).
 - Optionally, a suggested note if relevant.
 
-Before finalizing your response, double-check that all information is directly justified by the retrieved chunks and their corresponding chunk_ids.
+Before finalizing your response, double-check that all information is directly justified by the retrieved chunks and their corresponding chunk_ids, and that the answer text contains no chunk IDs or citation markers.

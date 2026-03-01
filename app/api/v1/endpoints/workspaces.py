@@ -2,14 +2,19 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
 from app.infrastructure.database import get_db
 from app.models.user import User
+from app.models.workspace import Workspace
+from app.models.workspace_membership import WorkspaceMembership
 from app.schemas.common import ErrorResponse
+from app.schemas.insights import WorkspaceInsightsResponse
 from app.schemas.workspace import WorkspaceCreate, WorkspaceRead
+from app.services.flashcard_service import FlashcardService
 from app.services.workspace_service import WorkspaceService
 
 router = APIRouter()
@@ -94,6 +99,53 @@ async def get_workspace(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting workspace: {str(e)}")
+
+
+@router.get(
+    "/workspaces/{workspace_id}/insights",
+    response_model=WorkspaceInsightsResponse,
+    responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get workspace insights",
+    description="Dashboard stats: average mastery (from SRS ease_factor), cards due, total cards with SRS. Requires workspace owner or member.",
+)
+async def get_workspace_insights(
+    workspace_id: Annotated[uuid.UUID, Path(description="Workspace ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkspaceInsightsResponse:
+    """Return precomputed insights for the current user in this workspace (average mastery, cards due, etc.)."""
+    try:
+        workspace_stmt = select(Workspace).where(Workspace.id == workspace_id)
+        workspace_result = await db.execute(workspace_stmt)
+        workspace = workspace_result.scalar_one_or_none()
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+
+        has_access = workspace.owner_id == current_user.id
+        if not has_access:
+            membership_stmt = select(WorkspaceMembership).where(
+                WorkspaceMembership.workspace_id == workspace_id,
+                WorkspaceMembership.user_id == current_user.id,
+            )
+            membership_result = await db.execute(membership_stmt)
+            if membership_result.scalar_one_or_none():
+                has_access = True
+
+        if not has_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this workspace",
+            )
+
+        flashcard_service = FlashcardService(db)
+        return await flashcard_service.get_workspace_insights(
+            user_id=current_user.id,
+            workspace_id=workspace_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading insights: {str(e)}")
 
 
 @router.patch(

@@ -163,6 +163,45 @@ curl "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-4466554400
 
 ---
 
+### Get Workspace Insights
+**GET** `/api/v1/workspaces/{workspace_id}/insights`
+
+Dashboard stats for the current user in the workspace: average mastery (from SRS ease_factor), cards due, total cards with SRS, total flashcards. Accessible by workspace owner or member.
+
+**Authentication:** Required (JWT token in Authorization header)
+
+**Path Parameters:**
+- `workspace_id` (UUID): Workspace ID
+
+**Response:** `200 OK`
+```json
+{
+  "average_mastery": 72.5,
+  "cards_due": 5,
+  "total_cards_with_srs": 12,
+  "total_flashcards": 15,
+  "kg_concepts_count": 20,
+  "documents_count": 8,
+  "recent_activity": 2
+}
+```
+
+- `average_mastery`: 0–100, derived from ease_factor (2.5 = 100%); `null` if no cards have been reviewed.
+- `cards_due`: Number of flashcards due for review (never reviewed or due_at in the past).
+- `total_cards_with_srs`: Number of flashcards with at least one review (SRS state exists).
+- `total_flashcards`: Total number of the user's flashcards in the workspace.
+- `kg_concepts_count`: Number of knowledge graph concepts in the workspace.
+- `documents_count`: Number of documents in the workspace.
+- `recent_activity`: Number of documents uploaded in the current week (ISO week, Monday–Sunday).
+
+**cURL Example:**
+```bash
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/workspaces/550e8400-e29b-41d4-a716-446655440000/insights"
+```
+
+---
+
 ### Update Workspace
 **PATCH** `/api/v1/workspaces/{workspace_id}`
 
@@ -403,11 +442,10 @@ Process a document: chunk it and generate embeddings. Always runs asynchronously
 **Path Parameters:**
 - `document_id` (UUID): Document ID to process
 
-**Request Body:**
+**Request Body:** (user is inferred from JWT)
 ```json
 {
   "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-  "user_id": "550e8400-e29b-41d4-a716-446655440001",
   "raw_text": "Optional: additional text to store"
 }
 ```
@@ -426,10 +464,10 @@ Process a document: chunk it and generate embeddings. Always runs asynchronously
 **cURL Example:**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/ingest" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "raw_text": "Optional: additional text to store"
   }'
 ```
@@ -502,11 +540,10 @@ Generate flashcards from a document. Always runs asynchronously in background.
 **Path Parameters:**
 - `document_id` (UUID): Source document ID
 
-**Request Body:**
+**Request Body:** (user is inferred from JWT)
 ```json
 {
   "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-  "user_id": "550e8400-e29b-41d4-a716-446655440001",
   "mode": "mcq"
 }
 ```
@@ -528,10 +565,10 @@ Generate flashcards from a document. Always runs asynchronously in background.
 **cURL Example:**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/flashcards" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "mode": "mcq"
   }'
 ```
@@ -546,11 +583,10 @@ Extract concepts and relationships from a document. Always runs asynchronously i
 **Path Parameters:**
 - `document_id` (UUID): Source document ID
 
-**Request Body:**
+**Request Body:** (user is inferred from JWT)
 ```json
 {
-  "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-  "user_id": "550e8400-e29b-41d4-a716-446655440001"
+  "workspace_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -568,10 +604,10 @@ Extract concepts and relationships from a document. Always runs asynchronously i
 **cURL Example:**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446655440002/kg" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001"
+    "workspace_id": "550e8400-e29b-41d4-a716-446655440000"
   }'
 ```
 
@@ -613,11 +649,10 @@ curl -X POST "http://localhost:8000/api/v1/documents/550e8400-e29b-41d4-a716-446
 
 Ask questions about documents in your workspace.
 
-**Request Body:**
+**Request Body:** (user is inferred from JWT; requires workspace owner or member)
 ```json
 {
   "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-  "user_id": "550e8400-e29b-41d4-a716-446655440001",
   "message": "What is the main topic of this document?",
   "document_id": "550e8400-e29b-41d4-a716-446655440002",
   "conversation_id": "550e8400-e29b-41d4-a716-446655440005",
@@ -661,10 +696,10 @@ Ask questions about documents in your workspace.
 ```bash
 # Basic chat query
 curl -X POST "http://localhost:8000/api/v1/chat" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "message": "What is the main topic of this document?",
     "document_id": "550e8400-e29b-41d4-a716-446655440002",
     "top_k": 8
@@ -672,10 +707,10 @@ curl -X POST "http://localhost:8000/api/v1/chat" \
 
 # Chat with conversation history
 curl -X POST "http://localhost:8000/api/v1/chat" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "workspace_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "message": "Can you give an example?",
     "document_id": "550e8400-e29b-41d4-a716-446655440002",
     "conversation_id": "550e8400-e29b-41d4-a716-446655440005",
@@ -890,13 +925,12 @@ List notes, optionally filtered by document or user.
 **cURL Example:**
 ```bash
 # List all notes in workspace
-curl "http://localhost:8000/api/v1/notes?workspace_id=550e8400-e29b-41d4-a716-446655440000"
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/notes?workspace_id=550e8400-e29b-41d4-a716-446655440000"
 
 # List notes for a specific document
-curl "http://localhost:8000/api/v1/notes?workspace_id=550e8400-e29b-41d4-a716-446655440000&document_id=550e8400-e29b-41d4-a716-446655440002"
-
-# List notes for a specific user
-curl "http://localhost:8000/api/v1/notes?workspace_id=550e8400-e29b-41d4-a716-446655440000&user_id=550e8400-e29b-41d4-a716-446655440001"
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/notes?workspace_id=550e8400-e29b-41d4-a716-446655440000&document_id=550e8400-e29b-41d4-a716-446655440002"
 ```
 
 ---
@@ -1148,22 +1182,23 @@ Get user preferences, creating defaults if not exists.
 
 **cURL Example:**
 ```bash
-# Get preferences for a user
-curl "http://localhost:8000/api/v1/preferences?user_id=550e8400-e29b-41d4-a716-446655440001"
+# Get preferences (user from JWT)
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" "http://localhost:8000/api/v1/preferences"
 
-# Get workspace-specific preferences
-curl "http://localhost:8000/api/v1/preferences?user_id=550e8400-e29b-41d4-a716-446655440001&workspace_id=550e8400-e29b-41d4-a716-446655440000"
+# Get workspace-specific preferences (optional workspace_id)
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8000/api/v1/preferences?workspace_id=550e8400-e29b-41d4-a716-446655440000"
 ```
 
 ---
 
 ### Update User Preferences
-**PATCH** `/api/v1/preferences?user_id={user_id}&workspace_id={workspace_id}`
+**PATCH** `/api/v1/preferences?workspace_id={workspace_id}`
 
-Update user preferences.
+Update user preferences. User is inferred from JWT.
 
 **Query Parameters:**
-- `workspace_id` (UUID, optional): Workspace ID
+- `workspace_id` (UUID, optional): Workspace ID for workspace-scoped preferences
 
 **Request Body:**
 ```json
@@ -1180,7 +1215,8 @@ Update user preferences.
 
 **cURL Example:**
 ```bash
-curl -X PATCH "http://localhost:8000/api/v1/preferences?user_id=550e8400-e29b-41d4-a716-446655440001&workspace_id=550e8400-e29b-41d4-a716-446655440000" \
+curl -X PATCH "http://localhost:8000/api/v1/preferences?workspace_id=550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "auto_ingest_on_upload": false,
@@ -1632,7 +1668,6 @@ Authorization: Bearer YOUR_ACCESS_TOKEN
 - `/api/v1/auth/google`
 - `/api/v1/auth/forgot-password`
 - `/api/v1/auth/reset-password`
-- `/api/v1/users/by-username/{username}` (public user lookup)
 
 **Authorization:** Users can only access/modify their own resources (notes, flashcards, documents they created) or resources in workspaces they belong to.
 
@@ -1773,22 +1808,10 @@ curl -X POST "http://localhost:8000/api/v1/documents/$DOCUMENT_ID/flashcards" \
 ### Step 7: Extract Knowledge Graph (Optional)
 ```bash
 curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/kg" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "workspace_id": "{workspace_id}",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001"
-  }'
-```
-
-**Note:** KG extraction always runs asynchronously. The response includes a `run_id` for tracking.
-
-### Step 7: Extract Knowledge Graph (Optional)
-```bash
-curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/kg" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_id": "{workspace_id}",
-    "user_id": "550e8400-e29b-41d4-a716-446655440001"
+    "workspace_id": "{workspace_id}"
   }'
 ```
 
@@ -1797,9 +1820,9 @@ curl -X POST "http://localhost:8000/api/v1/documents/{document_id}/kg" \
 ### Step 8: Review Flashcards (Optional)
 ```bash
 curl -X POST "http://localhost:8000/api/v1/flashcards/{flashcard_id}/review" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "user_id": "550e8400-e29b-41d4-a716-446655440001",
     "workspace_id": "{workspace_id}",
     "grade": 2,
     "response_time_ms": 5000
@@ -1811,7 +1834,7 @@ curl -X POST "http://localhost:8000/api/v1/flashcards/{flashcard_id}/review" \
 ## Notes
 
 1. **UUIDs**: Replace all UUID placeholders with actual UUIDs from your database
-2. **Workspace & User IDs**: You need valid `workspace_id` and `user_id` values
+2. **Workspace IDs**: You need valid `workspace_id` values; user is inferred from JWT
 3. **Async Operations**: All document processing endpoints (ingest, summary, flashcards, KG extraction) run asynchronously by default. Responses include a `run_id` for tracking status.
 4. **OpenAPI Docs**: Visit `http://localhost:8000/api/v1/openapi.json` or `http://localhost:8000/docs` for interactive API documentation
 5. **OpenAI Usage**: Routes that use OpenAI are marked with notes. See `OPENAI_SETUP_GUIDE.md` for details
@@ -1829,7 +1852,7 @@ curl -X POST "http://localhost:8000/api/v1/flashcards/{flashcard_id}/review" \
 | Category | Routes | Count |
 |----------|--------|-------|
 | Health & System | `/health` | 1 |
-| Workspaces | CRUD operations | 5 |
+| Workspaces | CRUD + insights | 6 |
 | Documents | CRUD + processing | 13 |
 | Chat | Chat endpoint | 1 |
 | Flashcards | List, Get, Due, Review | 4 |

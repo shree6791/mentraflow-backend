@@ -11,8 +11,8 @@ from app.agents.types import IngestionAgentInput
 logger = logging.getLogger(__name__)
 
 
-class IngestionState(TypedDict):
-    """State for ingestion agent graph."""
+class _IngestionStateRequired(TypedDict):
+    """Required keys for ingestion state."""
 
     input_data: IngestionAgentInput
     document_id: Any
@@ -25,6 +25,14 @@ class IngestionState(TypedDict):
     db: Any
     run_id: Any  # Agent run ID for logging steps
     preferences: Any  # User preferences (fetched once for parallel operations)
+
+
+class IngestionState(_IngestionStateRequired, total=False):
+    """State for ingestion agent graph. Optional content flags: True = ok (skipped or completed), False = failed."""
+
+    summary_ok: bool
+    flashcards_ok: bool
+    kg_ok: bool
 
 
 def build_ingestion_graph(service_tools: Any, db: Any) -> StateGraph:
@@ -279,7 +287,7 @@ async def _embed_chunks(state: IngestionState) -> IngestionState:
 
 
 async def _generate_optional_content(state: IngestionState) -> IngestionState:
-    """Generate summary, flashcards, and KG in parallel (best effort - failures don't block)."""
+    """Generate summary, flashcards, and KG in parallel. Document is marked ready only when all are valid (or skipped)."""
     # Fetch preferences once to avoid duplicate queries in parallel operations
     input_data = state["input_data"]
     db = state["db"]
@@ -291,7 +299,7 @@ async def _generate_optional_content(state: IngestionState) -> IngestionState:
     state_with_prefs = {**state, "preferences": preferences}
     
     # Run all three operations in parallel
-    # Each function handles its own errors internally, but we log any unexpected exceptions
+    # Each function returns state with summary_ok / flashcards_ok / kg_ok set
     results = await asyncio.gather(
         _generate_summary(state_with_prefs),
         _generate_flashcards(state_with_prefs),
@@ -299,13 +307,28 @@ async def _generate_optional_content(state: IngestionState) -> IngestionState:
         return_exceptions=True,  # Don't raise exceptions, let each function handle them
     )
     
-    # Log any unexpected exceptions (shouldn't happen since each function handles errors)
+    # Merge success flags: only set ready when all three are True (or skipped)
+    summary_ok = False
+    flashcards_ok = False
+    kg_ok = False
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             operation = ["summary", "flashcards", "kg"][i]
             logger.warning(f"Unexpected exception in {operation} generation: {str(result)}", exc_info=result)
+        else:
+            if i == 0:
+                summary_ok = result.get("summary_ok", False)
+            elif i == 1:
+                flashcards_ok = result.get("flashcards_ok", False)
+            else:
+                kg_ok = result.get("kg_ok", False)
     
-    return state
+    return {
+        **state,
+        "summary_ok": summary_ok,
+        "flashcards_ok": flashcards_ok,
+        "kg_ok": kg_ok,
+    }
 
 
 async def _generate_summary(state: IngestionState) -> IngestionState:
@@ -352,6 +375,7 @@ async def _generate_summary(state: IngestionState) -> IngestionState:
                             "stored_in_db": True,
                         },
                     )
+                    return {**state, "summary_ok": True}
                 else:
                     # Summary was generated but not stored - this shouldn't happen
                     await _log_step(
@@ -364,6 +388,7 @@ async def _generate_summary(state: IngestionState) -> IngestionState:
                             "warning": "Summary generated but not found in database",
                         },
                     )
+                    return {**state, "summary_ok": False}
             except Exception as summary_error:
                 # Re-raise to be caught by outer try/except
                 raise
@@ -374,11 +399,13 @@ async def _generate_summary(state: IngestionState) -> IngestionState:
                 "skipped",
                 details={"reason": "auto_summary_after_ingest is false"},
             )
+            return {**state, "summary_ok": True}  # Skipped by preference counts as ok
     except Exception as e:
         # Log but don't fail - summary is optional
         await _log_step(state, "summary", "failed", error=str(e))
+        return {**state, "summary_ok": False}
     
-    return state
+    return {**state, "summary_ok": False}
 
 
 async def _generate_flashcards(state: IngestionState) -> IngestionState:
@@ -439,6 +466,7 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
                                 "stored_in_db": True,
                             },
                         )
+                        return {**state, "flashcards_ok": True}
                     else:
                         # Flashcards were created but not found in database
                         await _log_step(
@@ -454,6 +482,7 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
                                 "warning": "Flashcards generated but not found in database",
                             },
                         )
+                        return {**state, "flashcards_ok": False}
                 else:
                     # No flashcards created (might be due to insufficient content or validation)
                     await _log_step(
@@ -467,6 +496,7 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
                             "dropped_count": flashcard_output.dropped_count,
                         },
                     )
+                    return {**state, "flashcards_ok": False}
             except Exception as flashcard_error:
                 # Re-raise to be caught by outer try/except
                 raise
@@ -477,12 +507,14 @@ async def _generate_flashcards(state: IngestionState) -> IngestionState:
                 "skipped",
                 details={"reason": "auto_flashcards_after_ingest is false"},
             )
+            return {**state, "flashcards_ok": True}  # Skipped by preference counts as ok
     except Exception as e:
         # Log but don't fail - flashcard generation is optional
         logger.error(f"Flashcard generation failed for document {input_data.document_id}: {str(e)}", exc_info=True)
         await _log_step(state, "flashcards", "failed", error=str(e))
+        return {**state, "flashcards_ok": False}
     
-    return state
+    return {**state, "flashcards_ok": False}
 
 
 async def _generate_kg(state: IngestionState) -> IngestionState:
@@ -541,6 +573,7 @@ async def _generate_kg(state: IngestionState) -> IngestionState:
                             "stored_in_db": True,
                         },
                     )
+                    return {**state, "kg_ok": True}
                 else:
                     # No concepts/edges extracted (might be due to insufficient content)
                     await _log_step(
@@ -553,6 +586,7 @@ async def _generate_kg(state: IngestionState) -> IngestionState:
                             "reason": "no_extractable_content",
                         },
                     )
+                    return {**state, "kg_ok": False}
             except Exception as kg_error:
                 # Log the error before re-raising
                 await _log_step(state, "kg_extraction", "failed", error=str(kg_error))
@@ -565,45 +599,54 @@ async def _generate_kg(state: IngestionState) -> IngestionState:
                 "skipped",
                 details={"reason": "auto_kg_after_ingest is false"},
             )
+            return {**state, "kg_ok": True}  # Skipped by preference counts as ok
     except Exception as e:
         # Log but don't fail - KG extraction is optional
         await _log_step(state, "kg_extraction", "failed", error=str(e))
+        return {**state, "kg_ok": False}
     
-    return state
+    return {**state, "kg_ok": False}
 
 
 async def _update_status(state: IngestionState) -> IngestionState:
-    """Update document status to ready."""
+    """Update document status: ready only when summary, flashcards, and KG are all valid (or skipped)."""
     await _log_step(state, "audit", "started")
     
     db = state["db"]
     document_id = state["document_id"]
-    
+    summary_ok = state.get("summary_ok", False)
+    flashcards_ok = state.get("flashcards_ok", False)
+    kg_ok = state.get("kg_ok", False)
+    all_valid = summary_ok and flashcards_ok and kg_ok
+
     try:
         from sqlalchemy import select
         from app.models.document import Document
-        
+
         stmt = select(Document).where(Document.id == document_id)
         result = await db.execute(stmt)
         document = result.scalar_one_or_none()
-        
+
         if document:
-            document.status = "ready"
+            document.status = "ready" if all_valid else "partial"
             await db.commit()
-            
+
             await _log_step(
                 state,
                 "audit",
                 "completed",
                 details={
-                    "document_status": "ready",
+                    "document_status": document.status,
+                    "summary_ok": summary_ok,
+                    "flashcards_ok": flashcards_ok,
+                    "kg_ok": kg_ok,
                     "chunks_count": len(state.get("chunks", [])),
                     "embeddings_count": len(state.get("embeddings", [])),
                 },
             )
     except Exception as e:
         await _log_step(state, "audit", "failed", error=str(e))
-    
+
     return {**state, "status": "completed"}
 
 

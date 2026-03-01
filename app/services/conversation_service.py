@@ -89,9 +89,38 @@ class ConversationService(BaseService):
         """Get messages for a conversation."""
         stmt = select(ConversationMessage).where(
             ConversationMessage.conversation_id == conversation_id
-        ).order_by(ConversationMessage.created_at.asc())
+        ).order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
         if limit:
             stmt = stmt.limit(limit)
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_all_messages_for_workspace(
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        only_valid_pairs: bool = True,
+    ) -> list[ConversationMessage]:
+        """Query only conversation_messages; filter by workspace via subquery. When only_valid_pairs=True, return messages only from conversations that have at least one assistant reply (valid Q&A pair)."""
+        convos_in_workspace = select(Conversation.id).where(Conversation.workspace_id == workspace_id)
+        if user_id is not None:
+            convos_in_workspace = convos_in_workspace.where(Conversation.user_id == user_id)
+        stmt = (
+            select(ConversationMessage)
+            .where(ConversationMessage.conversation_id.in_(convos_in_workspace))
+        )
+        if only_valid_pairs:
+            convos_with_answer = (
+                select(ConversationMessage.conversation_id)
+                .where(ConversationMessage.role == "assistant")
+                .distinct()
+            )
+            stmt = stmt.where(ConversationMessage.conversation_id.in_(convos_with_answer))
+        stmt = stmt.order_by(
+            ConversationMessage.conversation_id,
+            ConversationMessage.created_at.asc(),
+            ConversationMessage.id.asc(),
+        )
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 

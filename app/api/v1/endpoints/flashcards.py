@@ -123,6 +123,31 @@ async def list_flashcards(
 
 
 @router.get(
+    "/flashcards/due",
+    response_model=list[FlashcardRead],
+    responses={500: {"model": ErrorResponse}},
+    summary="Get due flashcards",
+)
+async def get_due_flashcards(
+    workspace_id: Annotated[uuid.UUID, Query(description="Workspace ID")],
+    current_user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=100, description="Maximum number of results")] = 20,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+) -> list[FlashcardRead]:
+    """Get flashcards due for review for the authenticated user."""
+    try:
+        service = FlashcardService(db)
+        flashcards = await service.get_due_flashcards(
+            user_id=current_user.id,
+            workspace_id=workspace_id,
+            limit=limit,
+        )
+        return [FlashcardRead.model_validate(f) for f in flashcards]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting due flashcards: {str(e)}")
+
+
+@router.get(
     "/flashcards/{flashcard_id}",
     response_model=FlashcardRead,
     responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
@@ -156,31 +181,6 @@ async def get_flashcard(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting flashcard: {str(e)}")
-
-
-@router.get(
-    "/flashcards/due",
-    response_model=list[FlashcardRead],
-    responses={500: {"model": ErrorResponse}},
-    summary="Get due flashcards",
-)
-async def get_due_flashcards(
-    workspace_id: Annotated[uuid.UUID, Query(description="Workspace ID")],
-    current_user: Annotated[User, Depends(get_current_user)],
-    limit: Annotated[int, Query(ge=1, le=100, description="Maximum number of results")] = 20,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
-) -> list[FlashcardRead]:
-    """Get flashcards due for review for the authenticated user."""
-    try:
-        service = FlashcardService(db)
-        flashcards = await service.get_due_flashcards(
-            user_id=current_user.id,
-            workspace_id=workspace_id,
-            limit=limit,
-        )
-        return [FlashcardRead.model_validate(f) for f in flashcards]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting due flashcards: {str(e)}")
 
 
 class FlashcardReviewRequest(BaseModel):

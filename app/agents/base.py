@@ -137,6 +137,18 @@ class BaseAgent(ABC, Generic[InputModel, OutputModel]):
         """Get current run ID if available."""
         return getattr(self, "_current_run_id", None)
 
+    def _serialize_input_for_logging(self, input_data: InputModel) -> dict[str, Any]:
+        """Serialize input for agent_runs.input JSONB. Override in subclasses if input has UUIDs etc."""
+        if hasattr(input_data, "model_dump"):
+            return input_data.model_dump()
+        return {}
+
+    def _serialize_output_for_logging(self, output: OutputModel) -> dict[str, Any]:
+        """Serialize output for agent_runs.output JSONB. Override in subclasses if output has UUIDs etc."""
+        if hasattr(output, "model_dump"):
+            return output.model_dump()
+        return {}
+
     def _check_and_raise_error(
         self, final_state: dict[str, Any], default_error: str = "Agent execution failed"
     ) -> None:
@@ -166,8 +178,8 @@ class BaseAgent(ABC, Generic[InputModel, OutputModel]):
             # Store input for access in execute_fn
             self._current_input = input_data
 
-            # Log start
-            input_json = input_data.model_dump() if hasattr(input_data, "model_dump") else {}
+            # Log start (subclasses may override _serialize_input_for_logging for JSONB-safe dict)
+            input_json = self._serialize_input_for_logging(input_data)
             run_id = await self._log_run_start(workspace_id, user_id, input_json)
             
             # Store run_id for access in execute_fn
@@ -180,8 +192,8 @@ class BaseAgent(ABC, Generic[InputModel, OutputModel]):
             if hasattr(output, "run_id"):
                 output.run_id = run_id
 
-            # Log success
-            output_json = output.model_dump() if hasattr(output, "model_dump") else {}
+            # Log success (subclasses may override _serialize_output_for_logging for JSONB-safe dict)
+            output_json = self._serialize_output_for_logging(output)
             await self._log_run_complete(run_id, output_json=output_json, status="succeeded")
 
             return output

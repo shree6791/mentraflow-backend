@@ -1,4 +1,5 @@
 """Workspace service."""
+import logging
 import uuid
 from typing import Any
 
@@ -7,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workspace import Workspace
 from app.services.base import BaseService
+
+logger = logging.getLogger(__name__)
 
 
 class WorkspaceService(BaseService):
@@ -81,11 +84,23 @@ class WorkspaceService(BaseService):
         return workspace
 
     async def delete_workspace(self, workspace_id: uuid.UUID) -> None:
-        """Delete a workspace (cascade deletes all related data)."""
+        """Delete a workspace (cascade deletes all related data). Also removes its vectors from Qdrant."""
         workspace = await self.get_workspace(workspace_id)
         if not workspace:
             raise ValueError(f"Workspace {workspace_id} not found")
-        
+
+        # Clean up Qdrant: delete chunk and concept vectors for this workspace
+        from app.infrastructure.qdrant import QdrantClientWrapper
+        try:
+            qdrant = QdrantClientWrapper()
+            await qdrant.delete_points_by_workspace_id(workspace_id)
+        except Exception as e:
+            logger.warning(
+                "Qdrant cleanup failed for workspace %s (proceeding with DB delete): %s",
+                workspace_id,
+                e,
+            )
+
         await self.db.delete(workspace)
         await self.db.commit()
 

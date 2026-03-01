@@ -60,6 +60,7 @@ TOP_K_MAX = 50
 # Score threshold for semantic search (0.0-1.0, cosine similarity)
 # Results below this threshold are filtered out to ensure quality
 DEFAULT_SCORE_THRESHOLD = 0.7  # Minimum similarity score (70% similarity)
+STUDY_CHAT_SCORE_THRESHOLD = 0.5  # Lower threshold for chat so "help me learn about X" still gets context
 SCORE_THRESHOLD_MIN = 0.0
 SCORE_THRESHOLD_MAX = 1.0
 

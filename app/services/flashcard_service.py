@@ -3,13 +3,19 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.concept import Concept
+from app.models.document import Document
 from app.models.flashcard import Flashcard
 from app.models.flashcard_review import FlashcardReview
 from app.models.flashcard_srs_state import FlashcardSRSState
+from app.schemas.insights import WorkspaceInsightsResponse
 from app.services.base import BaseService
+
+# Mastery formula: ease_factor 2.5 = 100%; same as frontend min(100, (ease_factor/2.5)*100)
+EASE_FULL_MASTERY = 2.5
 
 
 class FlashcardService(BaseService):
@@ -288,4 +294,89 @@ class FlashcardService(BaseService):
 
         await self._commit_and_refresh(review, srs_state)
         return review, srs_state
+
+    async def get_workspace_insights(
+        self, user_id: uuid.UUID, workspace_id: uuid.UUID
+    ) -> WorkspaceInsightsResponse:
+        """Compute workspace-level insights for dashboard (average mastery, cards due, etc.)."""
+        now = datetime.now(timezone.utc)
+
+        # Total flashcards in workspace for this user
+        total_stmt = (
+            select(func.count(Flashcard.id))
+            .where(
+                Flashcard.workspace_id == workspace_id,
+                Flashcard.user_id == user_id,
+            )
+        )
+        total_result = await self.db.execute(total_stmt)
+        total_flashcards = total_result.scalar() or 0
+
+        # SRS state rows for user's cards in this workspace
+        srs_stmt = (
+            select(FlashcardSRSState.ease_factor, FlashcardSRSState.due_at)
+            .join(Flashcard, Flashcard.id == FlashcardSRSState.flashcard_id)
+            .where(
+                Flashcard.workspace_id == workspace_id,
+                Flashcard.user_id == user_id,
+                FlashcardSRSState.user_id == user_id,
+            )
+        )
+        srs_result = await self.db.execute(srs_stmt)
+        srs_rows = list(srs_result.all())
+
+        total_cards_with_srs = len(srs_rows)
+
+        # Average mastery: mean of min(100, (ease_factor/2.5)*100) for cards with ease_factor
+        mastery_values = []
+        due_count = 0
+        for ease_factor, due_at in srs_rows:
+            if ease_factor is not None:
+                mastery = min(100.0, (float(ease_factor) / EASE_FULL_MASTERY) * 100.0)
+                mastery_values.append(mastery)
+            if due_at is None or due_at <= now:
+                due_count += 1
+
+        average_mastery = (
+            round(sum(mastery_values) / len(mastery_values), 1) if mastery_values else None
+        )
+
+        # Cards due = never reviewed (no SRS) + SRS rows that are due
+        cards_due = (total_flashcards - total_cards_with_srs) + due_count
+
+        # Knowledge graph concepts count in workspace
+        kg_count_stmt = (
+            select(func.count(Concept.id)).where(Concept.workspace_id == workspace_id)
+        )
+        kg_count_result = await self.db.execute(kg_count_stmt)
+        kg_concepts_count = kg_count_result.scalar() or 0
+
+        # Documents count in workspace
+        doc_count_stmt = (
+            select(func.count(Document.id)).where(Document.workspace_id == workspace_id)
+        )
+        doc_count_result = await self.db.execute(doc_count_stmt)
+        documents_count = doc_count_result.scalar() or 0
+
+        # Recent activity: documents uploaded in the current week (ISO week, Monday–Sunday)
+        start_of_week = (now - timedelta(days=now.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        recent_stmt = (
+            select(func.count(Document.id))
+            .where(Document.workspace_id == workspace_id)
+            .where(Document.created_at >= start_of_week)
+        )
+        recent_result = await self.db.execute(recent_stmt)
+        recent_activity = recent_result.scalar() or 0
+
+        return WorkspaceInsightsResponse(
+            average_mastery=average_mastery,
+            cards_due=cards_due,
+            total_cards_with_srs=total_cards_with_srs,
+            total_flashcards=total_flashcards,
+            kg_concepts_count=kg_concepts_count,
+            documents_count=documents_count,
+            recent_activity=recent_activity,
+        )
 

@@ -189,8 +189,9 @@ curl -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
 - `storing` - Storing raw text
 - `chunking` - Breaking into chunks
 - `embedding` - Generating embeddings
-- `ready` - Successfully processed and ready
-- `failed` - Processing failed
+- `ready` - Successfully processed: chunking and embedding done, and (when enabled by preferences) summary, flashcards, and KG all valid
+- `partial` - Chunking/embedding done but one or more of summary, flashcards, or KG failed or produced no output (upload not fully successful)
+- `failed` - Processing failed (e.g. chunking or embedding error)
 
 **Example Response (after processing):**
 ```json

@@ -37,7 +37,7 @@ class StudyChatAgentInput(BaseModel):
     """Input for StudyChatAgent."""
 
     workspace_id: uuid.UUID = Field(description="Workspace ID")
-    user_id: uuid.UUID = Field(description="User ID")
+    user_id: uuid.UUID | None = Field(default=None, description="User ID (ignored; set from JWT by chat endpoint)")
     message: str = Field(description="User's question or message")
     document_id: uuid.UUID | None = Field(default=None, description="Optional document ID to focus on")
     conversation_id: uuid.UUID | None = Field(default=None, description="Optional conversation ID for follow-up questions")

@@ -60,12 +60,12 @@ class IngestionAgentOutput(BaseModel):
 4. **Store in Qdrant** - Upsert vectors to Qdrant collection (`mentraflow_chunks`)
 5. **Generate Summary** (optional) - If `auto_summary_after_ingest` preference is enabled, generate summary using `SummaryAgent`
 6. **Generate Flashcards** (optional) - If `auto_flashcards_after_ingest` preference is enabled, generate flashcards using `FlashcardAgent` with `default_flashcard_mode`
-7. **Update Status** - Mark document as `ready` or `failed`
+7. **Update Status** - Mark document as `ready` (only when summary, flashcards, and KG are all valid or skipped), `partial` (one or more of them failed), or `failed`
 
 ### Key Features
 
 - **Idempotency:** Prevents duplicate ingestion runs
-- **Status Tracking:** Updates document status throughout process (`storing` → `chunking` → `embedding` → `ready`)
+- **Status Tracking:** Updates document status throughout process (`storing` → `chunking` → `embedding` → `ready` or `partial`). Document is `ready` only when summary, flashcards, and KG (when enabled by preferences) all succeed; otherwise status is `partial`.
 - **Error Handling:** Graceful failure with document status update
 - **Step Logging:** Logs each step in `agent_runs.steps` JSONB field
 - **Auto-summary:** Optionally generates summary based on user preferences
